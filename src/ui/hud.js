@@ -37,6 +37,9 @@ export class HUD {
     this.compass = this.q('#compass');
     this.compassLabel = this.q('#compassLabel');
     this.prompt = this.q('#prompt');
+    this.bossBar = this.q('#bossBar');
+    this.bossName = this.q('#bossName');
+    this.bossFill = this.q('#bossFill');
     this.toastEl = this.q('#toast');
     this.flashEl = this.q('#flash');
     this.popLayer = this.q('#popLayer');
@@ -69,6 +72,14 @@ export class HUD {
     this.biomeName.parentElement.classList.add('show');
     this._biomeT = 4.5;
   }
+
+  setBoss(name, frac) {
+    if (!this.bossBar) return;
+    this.bossBar.classList.add('show');
+    this.bossName.textContent = name;
+    this.bossFill.style.width = (clamp01(frac) * 100).toFixed(1) + '%';
+  }
+  clearBoss() { if (this.bossBar) this.bossBar.classList.remove('show'); }
 
   setPrompt(text) {
     if (!text) { this.prompt.classList.remove('show'); return; }
@@ -158,7 +169,7 @@ export class HUD {
     html += `<h3>Places found <span>${found.size}/${Object.keys(lm).length}</span></h3><div class="agrid">`;
     for (const k in lm) html += card(lm[k], 'a landmark', found.has(k), '#ffe9a8');
     html += '</div>';
-    html += `<div class="astats">light gathered: <b>${progress.glimmers}</b> · memories kept: <b>${progress.memories}</b> · charms: <b>${progress.relics}</b> · farthest from where you woke: <b>${Math.round(progress.deepest)}m</b></div>`;
+    html += `<div class="astats">light gathered: <b>${progress.glimmers}</b> · memories kept: <b>${progress.memories}</b> · charms: <b>${progress.relics}</b> · the Keeper felled: <b>${progress.bossesFelled || 0}</b> · farthest from where you woke: <b>${Math.round(progress.deepest)}m</b></div>`;
     wrap.innerHTML = html;
   }
 }

@@ -66,6 +66,8 @@ export class Controller {
     this._scratch2 = new THREE.Vector3();
     this.abilities = { doubleDash: false, longGlide: false, fastGrind: false };
     this._airDashes = 0;
+    this.maxAirDash = 1;                                  // boons raise this
+    this.tune = { dashCd: 1, jump: 1, glide: 0, rail: 1 }; // boon multipliers
   }
 
   reset(x, y, z) {
@@ -92,8 +94,8 @@ export class Controller {
   }
 
   _wishDir(input, yaw, out) {
-    // camera-relative move direction on the XZ plane
-    const f = this._scratch.set(Math.sin(yaw), 0, Math.cos(yaw));
+    // camera-relative move direction on the XZ plane (forward = look direction)
+    const f = this._scratch.set(-Math.sin(yaw), 0, -Math.cos(yaw));
     const r = this._scratch2.set(Math.cos(yaw), 0, -Math.sin(yaw));
     out.set(0, 0, 0).addScaledVector(f, input.move.z).addScaledVector(r, input.move.x);
     if (out.lengthSq() > 1) out.normalize();
@@ -149,7 +151,7 @@ export class Controller {
     this.eyeHeight = damp(this.eyeHeight, this.sliding ? EYE_SLIDE : EYE_STAND, 14, dt);
 
     // --- dash ---
-    if (input.justPressed('dash') && this._dashCd <= 0 && (this.onGround || this._airDashes < (this.abilities.doubleDash ? 1 : 0) + 1)) {
+    if (input.justPressed('dash') && this._dashCd <= 0 && (this.onGround || this._airDashes < this.maxAirDash)) {
       this._startDash(input, yaw, ev);
     }
     if (this.dashing) {
@@ -189,7 +191,7 @@ export class Controller {
     this._jumpBuf = Math.max(0, this._jumpBuf - dt);
     if (this._coyote > 0) this._coyote -= dt;
     if (this._jumpBuf > 0 && (this.onGround || this._coyote > 0)) {
-      this.vel.y = JUMP_VEL;
+      this.vel.y = JUMP_VEL * this.tune.jump;
       this.onGround = false; this._coyote = 0; this._jumpBuf = 0; this.sliding = false;
       ev.jumped = true;
     }
@@ -202,9 +204,11 @@ export class Controller {
     this.gliding = wantGlide;
 
     // --- gravity ---
-    const g = this.gliding ? GLIDE_GRAVITY : GRAVITY;
+    const glideG = GLIDE_GRAVITY / (1 + 0.3 * this.tune.glide);
+    const glideMaxFall = GLIDE_MAX_FALL / (1 + 0.18 * this.tune.glide);
+    const g = this.gliding ? glideG : GRAVITY;
     this.vel.y -= g * dt;
-    if (this.gliding && this.vel.y < -GLIDE_MAX_FALL) this.vel.y = -GLIDE_MAX_FALL;
+    if (this.gliding && this.vel.y < -glideMaxFall) this.vel.y = -glideMaxFall;
 
     // air pad / launcher check at feet
     const pad = this.world.airPadAt ? this.world.airPadAt(this.pos.x, this.pos.z, this.pos.y) : null;
@@ -220,18 +224,18 @@ export class Controller {
   }
 
   _startDash(input, yaw, ev) {
-    this.dashing = true; this._dashT = DASH_TIME; this._dashCd = DASH_CD;
+    this.dashing = true; this._dashT = DASH_TIME; this._dashCd = DASH_CD * this.tune.dashCd;
     this.iframes = DASH_TIME + 0.06;
     if (!this.onGround) this._airDashes++;
     // dash direction: movement input if any, else look-flat
     let dx, dz;
     if (input.move.x !== 0 || input.move.z !== 0) {
-      const f = Math.sin(yaw), fz = Math.cos(yaw);
+      const f = -Math.sin(yaw), fz = -Math.cos(yaw);
       const rx = Math.cos(yaw), rz = -Math.sin(yaw);
       dx = f * input.move.z + rx * input.move.x;
       dz = fz * input.move.z + rz * input.move.x;
     } else {
-      dx = Math.sin(yaw); dz = Math.cos(yaw);
+      dx = -Math.sin(yaw); dz = -Math.cos(yaw);
     }
     const l = Math.hypot(dx, dz) || 1; dx /= l; dz /= l;
     this.vel.x = dx * DASH_SPEED;
@@ -312,7 +316,7 @@ export class Controller {
     const g = this._grind;
     const rail = g.rail;
     g.ramp = Math.min(1, g.ramp + dt / 0.4);
-    const targetSpeed = lerp(GRIND_BOOST, this.abilities.fastGrind ? GRIND_TARGET + 5 : GRIND_TARGET, g.ramp);
+    const targetSpeed = lerp(GRIND_BOOST, (this.abilities.fastGrind ? GRIND_TARGET + 5 : GRIND_TARGET) * this.tune.rail, g.ramp);
     g.speed = damp(g.speed, targetSpeed, 4, dt);
 
     const len = rail.length;

@@ -49,7 +49,7 @@
           <p><b>WASD</b> move · <b>Mouse</b> look · <b>Shift</b> sprint</p>
           <p><b>Space</b> jump — hold in air to <b>glide</b></p>
           <p><b>Q</b> dash (it pulls toward things) · <b>Ctrl</b> slide</p>
-          <p><b>F</b> / click send light · touch a rail to grind · <b>J</b> Atlas</p>
+          <p><b>F</b> / click send light · <b>E</b> sense hidden things · <b>J</b> Atlas</p>
         </div>
         <div class="card">
           <h2>Phone</h2>
@@ -114,6 +114,15 @@
     </div>
   </div>
 
+  <!-- BOON CHOICE -->
+  <div id="boon" class="screen hidden">
+    <div class="panel">
+      <p class="kicker">a memory returns to you</p>
+      <h1 class="logo small">keep one thing</h1>
+      <div id="boonCards" class="boon-cards"></div>
+    </div>
+  </div>
+
   <!-- HUD -->
   <div id="hud">
     <div id="reticle"></div>
@@ -126,6 +135,8 @@
     </div>
 
     <div id="compass"><div class="comp-arrow">▲</div><div id="compassLabel"></div></div>
+
+    <div id="bossBar"><div id="bossName"></div><div class="bb-track"><div id="bossFill"></div></div></div>
 
     <div id="combo"><span id="comboNum">×2</span><span class="clabel">flow</span></div>
 
@@ -140,6 +151,7 @@
     <div id="mobileControls">
       <div id="stickBase"><div id="stickKnob"></div></div>
       <div class="rbtns">
+        <button id="tSense" class="tbtn small">SENSE</button>
         <button id="tPulse" class="tbtn small">LIGHT</button>
         <button id="tDash" class="tbtn">DASH</button>
         <button id="tJump" class="tbtn big">JUMP</button>

@@ -164,6 +164,14 @@ export class Decorator {
       }
     }
 
+    // ----- a rare hidden vault, tucked somewhere in the chunk (Sense to find) -----
+    if (!plan.kind && hash2(cx, cz, 9091) < 0.17) {
+      const vx = ox + 6 + hash2(cx, cz, 12) * (CHUNK - 12);
+      const vz = oz + 6 + hash2(cx, cz, 34) * (CHUNK - 12);
+      const vy = W.groundHeight(vx, vz);
+      if (vy > WATER_LEVEL + 0.5 && W.slope(vx, vz) < 1.1) this._secretVault(chunk, vx, vy, vz);
+    }
+
     // ----- city is structured (towers + rails + pads), not scattered -----
     if (this._cityWeightHigh(cx, cz)) this._buildCityBlock(chunk, cx, cz);
 
@@ -268,21 +276,34 @@ export class Decorator {
     addInst('bulb' + color, () => new THREE.SphereGeometry(1, 8, 6), this.M.glow('bulb' + color, color, 2.0), dummy.matrix);
   }
 
-  _glimmer(chunk, x, y, z, kind, color) {
+  _glimmer(chunk, x, y, z, kind, color, hidden) {
     const isMemory = kind === 'memory';
     const geo = this.M.geo('glimmer', () => new THREE.OctahedronGeometry(0.35, 0));
     const mesh = new THREE.Mesh(geo, this.M.glow('gl-' + color, color, isMemory ? 2.6 : 1.8));
     mesh.position.set(x, y, z);
     mesh.scale.setScalar(isMemory ? 1.6 : 1);
+    mesh.visible = !hidden;
     chunk.group.add(mesh);
-    const c = { x, y, z, kind, color, mesh, taken: false, dashable: true, baseY: y, phase: hash2(x | 0, z | 0, 3) * TAU,
-                value: isMemory ? 5 : 1 };
+    const c = { x, y, z, kind, color, mesh, taken: false, dashable: !hidden, hidden: !!hidden, baseY: y,
+                phase: hash2(x | 0, z | 0, 3) * TAU, value: isMemory ? 5 : 1 };
     if (isMemory) {
       const light = new THREE.PointLight(color, 8, 14, 2);
-      light.position.set(x, y, z); chunk.group.add(light); c.light = light;
+      light.position.set(x, y, z); light.visible = !hidden; chunk.group.add(light); c.light = light;
     }
     chunk.collectibles.push(c);
     chunk.poi.push(c);
+  }
+
+  // a hidden cache — invisible until the player Senses it. The brief asked for
+  // hidden secret interactables; this is the discovery arc.
+  _secretVault(chunk, x, y, z) {
+    const n = 4 + ((hash2(x | 0, z | 0, 51) * 3) | 0);
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * TAU;
+      this._glimmer(chunk, x + Math.cos(a) * 1.6, y + 0.8, z + Math.sin(a) * 1.6, 'glimmer', 0xbfe6ff, true);
+    }
+    const big = hash2(x | 0, z | 0, 77);
+    this._glimmer(chunk, x, y + 1.3, z, big > 0.62 ? 'memory' : 'glimmer', big > 0.62 ? 0xffe9a8 : 0x9ff0ff, true);
   }
 
   _cityWeightHigh(cx, cz) {

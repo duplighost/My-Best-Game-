@@ -37,12 +37,15 @@ export class CameraRig {
   addFovPunch(a) { this.fovPunch = Math.min(this.fovPunch + a, 16); }
   addRecoil(p) { this.recoilPitch += p; }
 
+  // forward matches the actual camera direction (a Three.js camera looks down
+  // -z; with yaw about Y that is (-sin, *, -cos)). Movement, aim and spawns all
+  // use this so "forward" means "where you're looking".
   forward(out) {
-    out.set(Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), Math.cos(this.yaw) * Math.cos(this.pitch));
+    out.set(-Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch));
     return out.normalize();
   }
   forwardFlat(out) {
-    out.set(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     return out.normalize();
   }
 

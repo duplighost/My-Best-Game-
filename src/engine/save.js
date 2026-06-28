@@ -8,6 +8,8 @@ const DEFAULT = {
   progress: {
     glimmers: 0, memories: 0, relics: 0, distance: 0, deepest: 0,
     abilities: { doubleDash: false, longGlide: false, fastGrind: false },
+    boons: {},                      // id -> level, chosen when a Memory is kept
+    bossesFelled: 0,
     seenBiomes: [], seenCreatures: [], seenEnemies: [], foundLandmarks: [],
   },
   firstRun: true,
@@ -23,6 +25,8 @@ export const Save = {
     data.settings = Object.assign({}, DEFAULT.settings, data.settings || {});
     data.progress = Object.assign({}, DEFAULT.progress, data.progress || {});
     data.progress.abilities = Object.assign({}, DEFAULT.progress.abilities, data.progress.abilities || {});
+    data.progress.boons = data.progress.boons || {};
+    if (typeof data.progress.bossesFelled !== 'number') data.progress.bossesFelled = 0;
     for (const k of ['seenBiomes', 'seenCreatures', 'seenEnemies', 'foundLandmarks']) if (!Array.isArray(data.progress[k])) data.progress[k] = [];
     return data;
   },

@@ -122,6 +122,14 @@ export class Audio {
   memory() { for (let i = 0; i < 4; i++) setTimeout(() => this._tone([262, 330, 392, 523][i], 0.5, 'sine', 0.05, 1.0), i * 90); }
   rail() { this._tone(260, 0.3, 'sawtooth', 0.04, 1.4); }
   enter() { this._tone(180, 0.4, 'sine', 0.05, 1.3); this._tone(90, 0.5, 'sine', 0.04, 1.2); }
+  sense() { this._tone(300, 0.45, 'sine', 0.045, 2.6); this._tone(600, 0.55, 'sine', 0.022, 2.1); }
+  reveal() { this._tone(880, 0.3, 'sine', 0.04, 1.4); setTimeout(() => this._tone(1320, 0.34, 'sine', 0.025, 1.3), 70); }
+  boon() { for (let i = 0; i < 3; i++) setTimeout(() => this._tone([392, 523, 784][i], 0.5, 'sine', 0.05, 1.0), i * 110); }
+  thunder() {
+    if (!this.started || this.muted) return;
+    this._noise(0.6, 0.16); this._tone(48, 0.9, 'sine', 0.09, 0.7); this._tone(72, 0.7, 'triangle', 0.05, 0.6);
+  }
+  bossCry() { this._tone(70, 0.8, 'sawtooth', 0.08, 1.5); this._tone(140, 0.6, 'square', 0.04, 1.3); this._noise(0.3, 0.06); }
   // fire: a soft pop/crackle near a lit hearth
   crackle(pos) {
     if (!this.started || this.muted) return;

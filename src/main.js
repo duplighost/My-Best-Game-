@@ -19,6 +19,20 @@ import { HUD } from './ui/hud.js';
 
 const MAX_LIGHT = 100;
 
+// Boons — chosen one at a time, each time a Memory is kept. The "build" that
+// makes you want to keep wandering. Named softly, in Reverie's voice.
+const BOONS = [
+  { id: 'glide', name: 'Lighter Step', desc: 'your glide carries you farther' },
+  { id: 'airdash', name: 'Second Wind', desc: 'one more dash, in the air' },
+  { id: 'dash', name: 'Quicker Light', desc: 'your dash returns to you sooner' },
+  { id: 'magnet', name: 'Open Hands', desc: 'light drifts to you from farther' },
+  { id: 'pulse', name: 'Brighter Send', desc: 'the light you send strikes harder' },
+  { id: 'maxlight', name: 'Deeper Well', desc: 'you can hold more light' },
+  { id: 'sense', name: 'Keener Sense', desc: 'sense farther, and more often' },
+  { id: 'rail', name: 'Truer Rails', desc: 'the grind-lines run faster under you' },
+  { id: 'jump', name: 'Longer Reach', desc: 'you leap a little higher' },
+];
+
 class Game {
   constructor() {
     this.save = Save.load();
@@ -50,6 +64,9 @@ class Game {
       onKill: (e) => this._onKill(e),
       onCollect: (c) => this._onCollect(c),
       onSeen: (kind, key, name) => this._onSeen(kind, key, name),
+      onBossSpawn: (b) => this._onBossSpawn(b),
+      onBossHp: (name, frac) => this.hud.setBoss(name, frac),
+      onBossDeath: (pos) => this._onBossDeath(pos),
     });
 
     this.hud = new HUD(document.getElementById('hud'));
@@ -59,7 +76,11 @@ class Game {
     this.state = 'loading';
     this.time = 0;
     this.dayTime = 0.18;          // 0..1 around the clock; start at dawn
+    this.maxLight = MAX_LIGHT;
     this.light = MAX_LIGHT;
+    this.senseRadius = 36;
+    this.senseCdMax = 1.5;
+    this._senseCd = 0;
     this.combo = 0; this.comboT = 0;
     this.spawn = new THREE.Vector3();
     this.fading = false; this.fadeT = 0;
@@ -71,7 +92,10 @@ class Game {
     this._homeNearPos = null;
     this._homeMusicT = 0;
     this._crackleT = 0;
+    this._dayF = 1;
+    this._bossCd = 25;     // grace before The Keeper can first wake
 
+    this.applyBoons();
     this._bindUI();
     this._placePlayer();
     this._preload();
@@ -177,6 +201,7 @@ class Game {
     this.input.bindButton(document.getElementById('tJump'), 'jump');
     this.input.bindButton(document.getElementById('tDash'), 'dash', true);
     this.input.bindButton(document.getElementById('tPulse'), 'pulse');
+    this.input.bindButton(document.getElementById('tSense'), 'interact', true);
     this.input.bindButton(document.getElementById('tSprint'), 'sprint');
     const stickBase = document.getElementById('stickBase'), stickKnob = document.getElementById('stickKnob');
     this.input.onStickStart = (x, y) => { if (stickBase) { stickBase.style.left = x + 'px'; stickBase.style.top = y + 'px'; stickBase.classList.add('show'); } };
@@ -234,7 +259,7 @@ class Game {
       : 'move with WASD · look with the mouse · find the light';
     this.hud.toast(t, 6);
     setTimeout(() => { if (this.state === 'playing') this.hud.toast(this.input.isTouch ? 'tap DASH to surge — it pulls toward what matters' : 'press Q to dash · hold Space in the air to glide', 6); }, 7000);
-    setTimeout(() => { if (this.state === 'playing') this.hud.toast(this.input.isTouch ? 'hold to glide · grab the rails in the city' : 'F to send light · ride the grind-lines · J for your Atlas', 6); }, 14000);
+    setTimeout(() => { if (this.state === 'playing') this.hud.toast(this.input.isTouch ? 'tap SENSE to find what the world is hiding' : 'F send light · E sense hidden things · J Atlas', 6); }, 14000);
     this.save.firstRun = false; this._writeSave();
   }
 
@@ -256,7 +281,7 @@ class Game {
   _respawn() {
     // return to spawn (or nearest safe), keep all progress
     this._placePlayer();
-    this.light = MAX_LIGHT * 0.7;
+    this.light = this.maxLight * 0.7;
     this.fading = false;
     this.entities.clear();
   }
@@ -266,23 +291,24 @@ class Game {
     this.audio.combo(this.combo);
     // combos restore a piece of light (not the whole thing)
     const restore = 4 + this.combo;
-    this.light = Math.min(MAX_LIGHT, this.light + restore);
+    this.light = Math.min(this.maxLight, this.light + restore);
     this.hud.popup(e.pos.clone().setY(e.pos.y + 1.2), '+' + restore, '#9ff0ff');
     this._addSeen('seenEnemies', e.type);
   }
   _onCollect(c) {
     if (c.kind === 'glimmer') {
       this.save.progress.glimmers++;
-      this.light = Math.min(MAX_LIGHT, this.light + 2);
+      this.light = Math.min(this.maxLight, this.light + 2);
       this.audio.pickup('glimmer');
       this.hud.popup(new THREE.Vector3(c.x, c.baseY + 0.6, c.z), '+1', '#9ff0ff');
     } else if (c.kind === 'memory') {
       this.save.progress.memories++;
-      this.light = MAX_LIGHT;
+      this.light = this.maxLight;
       this.audio.memory();
       this.hud.flash('#ffe9a8', 0.5);
       this.hud.popup(new THREE.Vector3(c.x, c.baseY + 0.8, c.z), 'a memory kept', '#ffe9a8', true);
-      this.hud.toast('a memory kept — the world feels a little more yours', 4);
+      this.hud.toast('a memory kept — keep one thing of it', 3);
+      setTimeout(() => { if (this.state === 'playing') this.openBoonChoice(); }, 650);
     } else if (c.kind === 'relic') {
       this.save.progress.relics++;
       if (c.ability) { this.controller.abilities[c.ability] = true; this.save.progress.abilities[c.ability] = true; }
@@ -303,6 +329,113 @@ class Game {
     if (!this.save.progress[list].includes(key)) { this.save.progress[list].push(key); this._writeSave(); }
   }
 
+  // ---------- boons (the build) ----------
+  applyBoons() {
+    const bo = this.save.progress.boons || {};
+    const lvl = (id) => bo[id] || 0;
+    const ab = this.controller.abilities;
+    this.maxLight = MAX_LIGHT + lvl('maxlight') * 25;
+    if (this.light > this.maxLight) this.light = this.maxLight;
+    this.controller.tune.dashCd = Math.pow(0.86, lvl('dash'));
+    this.controller.tune.jump = 1 + lvl('jump') * 0.11;
+    this.controller.tune.glide = lvl('glide') + (ab.longGlide ? 1 : 0);
+    this.controller.tune.rail = (1 + lvl('rail') * 0.12) * (ab.fastGrind ? 1.18 : 1);
+    this.controller.maxAirDash = 1 + lvl('airdash') + (ab.doubleDash ? 1 : 0);
+    this.entities.magnetMul = 1 + lvl('magnet') * 0.5;
+    this.entities.pulseDmg = 1 + lvl('pulse') * 0.5;
+    this.senseRadius = 36 + lvl('sense') * 14;
+    this.senseCdMax = Math.max(0.5, 1.5 * Math.pow(0.82, lvl('sense')));
+  }
+
+  openBoonChoice() {
+    const bo = this.save.progress.boons;
+    const pool = BOONS.filter((b) => (bo[b.id] || 0) < 6);
+    for (let i = pool.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const choices = pool.slice(0, 3);
+    if (!choices.length) return;
+    this.state = 'boon';
+    this.audio.boon();
+    if (!this.input.isTouch) this.input.exitLock();
+    const wrap = document.getElementById('boonCards'); wrap.innerHTML = '';
+    choices.forEach((b) => {
+      const have = bo[b.id] || 0;
+      const card = document.createElement('button');
+      card.className = 'booncard';
+      card.innerHTML = `<div class="bcname">${b.name}</div><div class="bcdesc">${b.desc}</div>` + (have ? `<div class="bclvl">kept ×${have}</div>` : '');
+      card.addEventListener('click', () => this._chooseBoon(b.id));
+      wrap.appendChild(card);
+    });
+    document.getElementById('boon').classList.remove('hidden');
+    document.getElementById('boon').classList.add('active');
+  }
+  _chooseBoon(id) {
+    const bo = this.save.progress.boons;
+    bo[id] = (bo[id] || 0) + 1;
+    this.applyBoons();
+    this._writeSave();
+    document.getElementById('boon').classList.add('hidden');
+    document.getElementById('boon').classList.remove('active');
+    this.state = 'playing';
+    this.hud.flash('#ffe9a8', 0.3);
+    if (!this.input.isTouch) this.input.requestLock();
+  }
+
+  // ---------- the boss ----------
+  _onBossSpawn(b) {
+    this.audio.bossCry();
+    this.rig.addShake(0.6);
+    this.hud.setBoss(b.name, 1);
+    this.hud.toast('something old has woken — break its lanterns, then its heart', 6);
+  }
+  _onBossDeath(pos) {
+    this.hud.clearBoss();
+    this.hud.flash('#ffe9a8', 0.6);
+    this.save.progress.bossesFelled = (this.save.progress.bossesFelled || 0) + 1;
+    this.save.progress.memories++;
+    this.hud.setCounters(this.save.progress.glimmers, this.save.progress.memories);
+    this.hud.popup(pos.clone().setY(pos.y + 4), 'the Keeper is at rest', '#ffe9a8', true);
+    this.hud.toast('the Keeper is at rest — it leaves you a memory', 5);
+    this.audio.memory();
+    this._writeSave();
+    setTimeout(() => { if (this.state === 'playing') this.openBoonChoice(); }, 1000);
+    this._bossCd = 150;
+  }
+  _maybeWakeBoss(cl, realDt) {
+    this._bossCd = Math.max(0, this._bossCd - realDt);
+    if (this.entities.boss || this._bossCd > 0) return;
+    if (!cl || cl.dom !== 'hollow' || this._dayF > 0.42) return;        // hollow, at night
+    if (Math.random() < realDt * 0.07) {
+      const a = this.rig.yaw;   // spawn it ahead of you (where you're looking)
+      const sx = this.controller.pos.x - Math.sin(a) * 32, sz = this.controller.pos.z - Math.cos(a) * 32;
+      const sy = this.world.groundHeight(sx, sz);
+      if (sy > 0.5) this.entities.spawnBoss(sx, sy, sz);
+    }
+  }
+
+  _maybeStorm(hollowW, realDt) {
+    if (hollowW < 0.5 || this._dayF > 0.62) { this._stormT = 6 + Math.random() * 6; return; }
+    this._stormT = (this._stormT || 8) - realDt;
+    if (this._stormT <= 0) {
+      this._stormT = 7 + Math.random() * 12;
+      this.hud.flash('#e8f0ff', 0.55);
+      setTimeout(() => this.hud.flash('#cfe0ff', 0.32), 95);
+      setTimeout(() => this.audio.thunder(), 400 + Math.random() * 1500);
+    }
+  }
+
+  _doSense() {
+    if (this._senseCd > 0 || this.state !== 'playing') return;
+    this._senseCd = this.senseCdMax;
+    this.audio.sense();
+    this.rig.addFovPunch(3);
+    const n = this.entities.sense(this.controller.pos, this.senseRadius);
+    if (n > 0) {
+      this.audio.reveal();
+      this.hud.flash('#bfe6ff', 0.16);
+      this.hud.popup(new THREE.Vector3(this.controller.pos.x, this.controller.pos.y + 1.7, this.controller.pos.z), n === 1 ? 'something hidden' : n + ' hidden things', '#bfe6ff', true);
+    }
+  }
+
   _writeSave() {
     this.save.progress.distance = Math.round(this.save.progress.distance);
     Save.save(this.save);
@@ -316,6 +449,7 @@ class Game {
     const sunY = Math.sin(ang);
     const sunDir = this._fwd.set(Math.cos(ang) * 0.6, Math.max(-0.3, sunY), Math.sin(ang * 0.7) * 0.6).normalize();
     const dayF = clamp01(sunY * 1.4 + 0.35); // 0 night .. 1 day
+    this._dayF = dayF;
 
     // blend biome env by weights at the player
     const cl = this.world.climate(playerPos.x, playerPos.z);
@@ -361,6 +495,7 @@ class Game {
     const hollowW = cl.w.hollow || 0, forestW = cl.w.forest || 0;
     this.r.setWeather(hollowW, clamp01((forestW - 0.35) * 2) * dayF * 0.34);
     this.audio.setRain(hollowW * 0.9);
+    this._maybeStorm(hollowW, dt);
     return cl;
   }
 
@@ -409,7 +544,7 @@ class Game {
     this.time += realDt;
 
     if (this.state === 'playing') this._stepPlaying(realDt);
-    else if (this.state === 'paused' || this.state === 'atlas') {
+    else if (this.state === 'paused' || this.state === 'atlas' || this.state === 'boon') {
       // keep the world gently breathing behind the menu
       this.r.update(realDt, this.time, this.controller.pos, this._fwd);
       this.world.materials.update(realDt * 0.2);
@@ -442,14 +577,17 @@ class Game {
       this.entities.update(gdt, realDt, this.controller.pos, this.rig.yaw);
     }
 
-    // pulse attack
+    // pulse attack + sense
     if (input.justPressed('pulse')) this.entities.pulse(this.rig.yaw, this.rig.pitch);
+    if (input.justPressed('interact')) this._doSense();
     if (input.justPressed('atlas')) this._openAtlas();
     if (input.justPressed('pause')) this._pause();
+    this._senseCd = Math.max(0, this._senseCd - realDt);
 
     // camera + env + audio
     this.rig.update(realDt, this.controller, input, this.fx);
     const cl = this._updateEnv(realDt, this.controller.pos);
+    this._maybeWakeBoss(cl, realDt);
     this.rig.forwardFlat(this._fwd);
     this.audio.setListener(this.rig.cam.position, this._fwd);
     this.audio.update(realDt);
@@ -458,11 +596,15 @@ class Game {
     if (this.comboT > 0) { this.comboT -= realDt; if (this.comboT <= 0 && this.combo > 0) { this.combo = 0; this.hud.setCombo(0); } }
 
     // light slowly returns in safe biomes
-    if (this.entities.enemies.length === 0 && this.light < MAX_LIGHT) this.light = Math.min(MAX_LIGHT, this.light + realDt * 3);
-    this.hud.setLight(this.light / MAX_LIGHT);
+    if (this.entities.enemies.length === 0 && this.light < this.maxLight) this.light = Math.min(this.maxLight, this.light + realDt * 3);
+    this.hud.setLight(this.light / this.maxLight);
 
     // landmarks + compass
     this._checkLandmarks(this.controller.pos);
+    // a hint when the world is hiding something near you (Sense to reveal it)
+    if (this._senseCd <= 0 && this.entities.hiddenNear(this.controller.pos, this.senseRadius * 1.5))
+      this.hud.setPrompt(this.input.isTouch ? 'tap SENSE — something is hidden near' : 'press E to sense — something is hidden near');
+    else this.hud.setPrompt(null);
     // the music box turns again now and then while you linger in a home
     if (this._homeNearPos) {
       this._homeMusicT -= realDt;
