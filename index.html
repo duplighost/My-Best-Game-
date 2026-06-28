@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#06040b" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3CradialGradient id='g' cx='50%25' cy='42%25' r='60%25'%3E%3Cstop offset='0' stop-color='%23bfe6ff'/%3E%3Cstop offset='0.55' stop-color='%237aa0ff'/%3E%3Cstop offset='1' stop-color='%23090518'/%3E%3C/radialGradient%3E%3C/defs%3E%3Crect width='64' height='64' fill='%23090518'/%3E%3Ccircle cx='32' cy='30' r='20' fill='url(%23g)'/%3E%3C/svg%3E" />
+  <title>Reverie — an endless world to fall into</title>
+  <meta name="description" content="Reverie — wander an infinite, ever-changing world of light. First-person, fast, and strange. Find the memories. Keep going." />
+  <link rel="stylesheet" href="./src/styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- LOADING -->
+  <div id="loading" class="screen active">
+    <div class="panel">
+      <div class="sigil" aria-hidden="true"></div>
+      <p class="kicker">building somewhere that doesn't end</p>
+      <h1 class="logo">REVERIE</h1>
+      <div class="bar"><div id="loadFill"></div></div>
+      <p class="tiny">warming the sky…</p>
+    </div>
+  </div>
+
+  <!-- TITLE -->
+  <div id="title" class="screen hidden">
+    <div class="panel wide">
+      <div class="title-row">
+        <div>
+          <p class="kicker">first-person · infinite · strange and beautiful</p>
+          <h1 class="logo">REVERIE</h1>
+          <p class="lede">A world of light that goes on forever. Move fast, glide far, follow the glow, and keep what you find. There is no wrong way to wander.</p>
+        </div>
+        <div class="save-chip" id="saveChip">a new world</div>
+      </div>
+
+      <div class="cards">
+        <div class="card">
+          <h2>Keyboard &amp; Mouse</h2>
+          <p><b>WASD</b> move · <b>Mouse</b> look · <b>Shift</b> sprint</p>
+          <p><b>Space</b> jump — hold in air to <b>glide</b></p>
+          <p><b>Q</b> dash (it pulls toward things) · <b>Ctrl</b> slide</p>
+          <p><b>F</b> / click send light · touch a rail to grind · <b>J</b> Atlas</p>
+        </div>
+        <div class="card">
+          <h2>Phone</h2>
+          <p><b>Left thumb</b> move · <b>Right thumb</b> look</p>
+          <p><b>JUMP</b> (hold to glide) · <b>DASH</b> · <b>LIGHT</b></p>
+          <p>Two thumbs, anywhere. Grind-lines carry you in the city.</p>
+          <p>Pause for your Atlas of everything you've found.</p>
+        </div>
+      </div>
+
+      <div class="settings">
+        <div class="setrow">
+          <span class="setlabel">look quality</span>
+          <div id="qualityRow" class="seg">
+            <button class="qbtn" data-q="auto">auto</button>
+            <button class="qbtn" data-q="low">low</button>
+            <button class="qbtn" data-q="medium">medium</button>
+            <button class="qbtn" data-q="high">high</button>
+          </div>
+        </div>
+        <div class="setrow">
+          <span class="setlabel">look speed</span>
+          <input type="range" id="sensRange" min="0.4" max="2.4" step="0.05" value="1" />
+        </div>
+        <div class="setrow toggles">
+          <label><input type="checkbox" id="invertY" /> invert look</label>
+          <label><input type="checkbox" id="reducedMotion" /> calmer camera</label>
+          <label><input type="checkbox" id="muteToggle" /> mute</label>
+        </div>
+        <p id="reloadNote" class="reload-note">quality applies next time you open Reverie</p>
+      </div>
+
+      <div class="actions">
+        <button id="playBtn" class="primary">fall in</button>
+        <button id="resetBtn" class="ghost">forget this world</button>
+      </div>
+      <a class="home-link" href="https://qualiacology.com">part of qualiacology</a>
+    </div>
+  </div>
+
+  <!-- PAUSE -->
+  <div id="pause" class="screen hidden">
+    <div class="panel">
+      <p class="kicker">the world is holding its place</p>
+      <h1 class="logo small">paused</h1>
+      <div class="actions col">
+        <button id="resumeBtn" class="primary">keep wandering</button>
+        <button id="atlasBtn" class="ghost">open the Atlas</button>
+        <button id="titleBtn" class="ghost">back to the start</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ATLAS -->
+  <div id="atlas" class="screen hidden">
+    <div class="panel wide atlas">
+      <div class="atlas-head">
+        <div><p class="kicker">everything you've found</p><h1 class="logo small">the Atlas</h1></div>
+        <button id="atlasClose" class="ghost">close</button>
+      </div>
+      <div id="atlasBody" class="atlas-body"></div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="reticle"></div>
+
+    <div class="biome-panel"><div class="bp-inner"><div id="biomeName"></div><div id="biomeBlurb"></div></div></div>
+
+    <div class="counters">
+      <div class="ctr"><span class="cdot glimmer"></span><span id="cGlimmer">0</span></div>
+      <div class="ctr"><span class="cdot memory"></span><span id="cMemory">0</span></div>
+    </div>
+
+    <div id="compass"><div class="comp-arrow">▲</div><div id="compassLabel"></div></div>
+
+    <div id="combo"><span id="comboNum">×2</span><span class="clabel">flow</span></div>
+
+    <div class="light-meter"><div class="lm-track"><div id="lightFill"></div></div></div>
+
+    <div id="prompt"></div>
+    <div id="toast"></div>
+
+    <div id="popLayer"></div>
+    <div id="flash"></div>
+
+    <div id="mobileControls">
+      <div id="stickBase"><div id="stickKnob"></div></div>
+      <div class="rbtns">
+        <button id="tPulse" class="tbtn small">LIGHT</button>
+        <button id="tDash" class="tbtn">DASH</button>
+        <button id="tJump" class="tbtn big">JUMP</button>
+      </div>
+      <button id="tSprint" class="tbtn sprint">RUN</button>
+    </div>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
