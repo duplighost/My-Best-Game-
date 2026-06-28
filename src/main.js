@@ -68,6 +68,8 @@ class Game {
     this._envAccum = {};
     this._tutorialStep = 0;
     this._lastLandmark = null;
+    this._homeNearPos = null;
+    this._homeMusicT = 0;
 
     this._bindUI();
     this._placePlayer();
@@ -358,21 +360,31 @@ class Game {
 
   _checkLandmarks(playerPos) {
     let nearest = null, nd = Infinity, enter = null;
+    let home = null, homeD = Infinity;
     for (const it of this.world.interiorTriggers) {
       const d = Math.hypot(it.x - playerPos.x, it.z - playerPos.z);
       if (d < nd) { nd = d; nearest = it; }
       if (d < 6 && Math.abs(it.y - playerPos.y) < 14) enter = it;
+      if ((it.key === 'house' || it.key === 'cabin') && d < homeD && d < 12) { homeD = d; home = it; }
     }
+    // a home you're inside keeps its music box turning
+    this._homeNearPos = home ? new THREE.Vector3(home.x, home.y + 1.4, home.z) : null;
     // compass to the nearest landmark (gentle)
     this.hud.setCompass(this.rig.cam, nearest && nd < 380 ? nearest : null, nearest ? nearest.name : '');
     if (enter && enter.key !== this._lastLandmark) {
       this._lastLandmark = enter.key;
-      if (!this.save.progress.foundLandmarks.includes(enter.key)) {
+      const fresh = !this.save.progress.foundLandmarks.includes(enter.key);
+      if (fresh) {
         this.save.progress.foundLandmarks.push(enter.key);
         this.audio.enter();
         this.hud.flash('#ffffff', 0.18);
         this.hud.toast('you found ' + enter.name.toLowerCase(), 4);
         this._writeSave();
+      }
+      if (enter.key === 'house' || enter.key === 'cabin') {
+        this.audio.musicBox(new THREE.Vector3(enter.x, enter.y + 1.4, enter.z));
+        this._homeMusicT = 19;
+        if (fresh) this.hud.toast('someone lived here, once', 4.5);
       }
     } else if (!enter) {
       if (nd > 12) this._lastLandmark = null;
@@ -445,6 +457,11 @@ class Game {
 
     // landmarks + compass
     this._checkLandmarks(this.controller.pos);
+    // the music box turns again now and then while you linger in a home
+    if (this._homeNearPos) {
+      this._homeMusicT -= realDt;
+      if (this._homeMusicT <= 0) { this.audio.musicBox(this._homeNearPos); this._homeMusicT = 17 + Math.random() * 9; }
+    }
 
     // fade/respawn
     if (this.fading) {

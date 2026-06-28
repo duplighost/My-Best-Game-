@@ -154,7 +154,7 @@ export class HUD {
     html += `<h3>Gentle things <span>${seenC.size}/${Object.keys(CREATURE_NAMES).length}</span></h3><div class="agrid">`;
     for (const k in CREATURE_NAMES) html += card(CREATURE_NAMES[k], CREATURE_DESC[k] || '', seenC.has(k), '#9ff0c8');
     html += '</div>';
-    const lm = { house: 'A House That Waited', spire: 'The Listening Spire', oasis: 'The Oasis That Remembers', shrine: 'Where the Watcher Rests', tree: 'The Tree That Holds the Light', door: 'A Door to Nowhere', monument: 'The Monument of Quiet' };
+    const lm = { house: 'A House That Waited', cabin: 'A Cabin in the Cold Woods', spire: 'The Listening Spire', oasis: 'The Oasis That Remembers', shrine: 'Where the Watcher Rests', tree: 'The Tree That Holds the Light', door: 'A Door to Nowhere', monument: 'The Monument of Quiet' };
     html += `<h3>Places found <span>${found.size}/${Object.keys(lm).length}</span></h3><div class="agrid">`;
     for (const k in lm) html += card(lm[k], 'a landmark', found.has(k), '#ffe9a8');
     html += '</div>';

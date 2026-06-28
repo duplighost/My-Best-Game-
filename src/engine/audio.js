@@ -122,4 +122,14 @@ export class Audio {
   memory() { for (let i = 0; i < 4; i++) setTimeout(() => this._tone([262, 330, 392, 523][i], 0.5, 'sine', 0.05, 1.0), i * 90); }
   rail() { this._tone(260, 0.3, 'sawtooth', 0.04, 1.4); }
   enter() { this._tone(180, 0.4, 'sine', 0.05, 1.3); this._tone(90, 0.5, 'sine', 0.04, 1.2); }
+  // a faint, slightly out-of-time music-box lullaby — comfort gone cold
+  musicBox(pos) {
+    if (!this.started || this.muted) return;
+    const notes = [659, 784, 880, 784, 659, 587, 523, 587]; // a small wistful phrase
+    for (let i = 0; i < notes.length; i++) {
+      const drift = 1 + (i % 3 - 1) * 0.004; // a little out of tune, like an old box
+      setTimeout(() => this._tone(notes[i] * drift, 0.55, 'sine', 0.022, 1.0, pos), i * 330);
+    }
+    setTimeout(() => this._tone(330, 1.2, 'sine', 0.014, 1.0, pos), notes.length * 330); // a low held note
+  }
 }

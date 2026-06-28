@@ -31,9 +31,26 @@ export class Decorator {
     const cellW = CHUNK / sample;
     const dummy = new THREE.Object3D();
 
-    // landmark decision for this chunk (rare, deterministic)
+    // ----- decide the landmark up front so scatter can clear a space for it -----
     const lmRoll = hash2(cx, cz, 7777);
-    let landmarkBuilt = false;
+    const ctrX = ox + CHUNK / 2, ctrZ = oz + CHUNK / 2;
+    const lmCl = W.climate(ctrX, ctrZ);
+    const lmY = W.groundHeight(ctrX, ctrZ);
+    let landmark = null, clearR = 0;
+    if (lmY > WATER_LEVEL + 0.5 && W.slope(ctrX, ctrZ) < 0.7) {
+      const I = this.interiors, dom = lmCl.dom;
+      if (dom === 'hollow') {
+        if (lmRoll < 0.14) { landmark = () => I.hauntedHouse(chunk, ctrX, lmY, ctrZ); clearR = 22; }
+        else if (lmRoll < 0.24) { landmark = () => I.forestCabin(chunk, ctrX, lmY, ctrZ); clearR = 14; }
+      } else if (dom === 'forest') {
+        if (lmRoll < 0.06) { landmark = () => I.greatTree(chunk, ctrX, lmY, ctrZ); clearR = 16; }
+        else if (lmRoll < 0.15) { landmark = () => I.forestCabin(chunk, ctrX, lmY, ctrZ); clearR = 14; }
+      } else if (dom === 'shrine' && lmRoll < 0.5) { landmark = () => I.shrineSanctum(chunk, ctrX, lmY, ctrZ); clearR = 16; }
+      else if (dom === 'desert' && lmRoll < 0.08) { landmark = () => I.oasisRefuge(chunk, ctrX, lmY, ctrZ); clearR = 26; }
+      else if (dom === 'city' && lmRoll < 0.12) { landmark = () => I.alienSpire(chunk, ctrX, lmY, ctrZ); clearR = 12; }
+      else if (dom === 'meadow' && lmRoll < 0.04) { landmark = () => I.loneDoor(chunk, ctrX, lmY, ctrZ); clearR = 6; }
+      else if (dom === 'snow' && lmRoll < 0.05) { landmark = () => I.frozenMonument(chunk, ctrX, lmY, ctrZ); clearR = 13; }
+    }
 
     for (let gz = 0; gz < sample; gz++) {
       for (let gx = 0; gx < sample; gx++) {
@@ -44,6 +61,7 @@ export class Decorator {
         const z = oz + gz * cellW + (r2 - 0.5) * cellW * 1.4;
         const y = W.groundHeight(x, z);
         if (y < WATER_LEVEL + 0.3) continue;        // skip water
+        if (clearR > 0 && Math.hypot(x - ctrX, z - ctrZ) < clearR) continue; // keep the landmark clear
         const cl = W.climate(x, z);
         const slope = W.slope(x, z);
         if (slope > 1.3) continue;                   // skip cliffs
@@ -105,20 +123,20 @@ export class Decorator {
             addInst('snowrock', () => new THREE.IcosahedronGeometry(1, 0), this.M.std('snowrock', 0x59648a, { roughness: 0.9 }), dummy.matrix, true);
           } else if (r3 > 0.965) this._glimmer(chunk, x, y + 1.0, z, 'glimmer', 0xd6f4ff);
         } else if (dom === 'hollow') {
-          if (r3 < 0.32) { // dead tree
+          if (r3 < 0.46) { // dead tree — a denser, spookier wood
             this._deadTree(chunk, addInst, dummy, x, y, z, r1, r2);
             chunk.walls.push({ type: 'circle', x, z, r: 0.6 });
-          } else if (r3 < 0.42) { // lantern (limited point lights handled by glow only)
+          } else if (r3 < 0.56) { // lantern (limited point lights handled by glow only)
             const h = 1.4 + r1;
             dummy.position.set(x, y + h, z); dummy.scale.setScalar(0.4); dummy.updateMatrix();
             addInst('lantern', () => new THREE.OctahedronGeometry(1, 0), this.M.glow('lantern', 0xffcf85, 2.0), dummy.matrix);
             // a thin post
             dummy.position.set(x, y + h / 2, z); dummy.scale.set(0.08, h, 0.08); dummy.rotation.set(0, 0, 0); dummy.updateMatrix();
             addInst('post', () => new THREE.CylinderGeometry(1, 1, 1, 5), this.M.std('post', 0x241b2e), dummy.matrix);
-          } else if (r3 < 0.5) { // grave
+          } else if (r3 < 0.66) { // grave
             dummy.position.set(x, y + 0.5, z); dummy.rotation.set(0.05 * (r1 - 0.5), r2 * TAU, 0.06 * (r3 - 0.5)); dummy.scale.set(0.7, 1, 0.18); dummy.updateMatrix();
             addInst('grave', () => new THREE.BoxGeometry(1, 1, 1), this.M.std('grave', 0x3c3048, { roughness: 0.95 }), dummy.matrix, true);
-          } else if (r3 < 0.58) this._glowpool(addInst, dummy, x, y, z, 0xffb060);
+          } else if (r3 < 0.74) this._glowpool(addInst, dummy, x, y, z, 0xffb060);
           else if (r3 > 0.95) this._glimmer(chunk, x, y + 1.0, z, 'glimmer', 0xc6a9ff);
         } else if (dom === 'shrine') {
           if (r3 < 0.12) { // monolith
@@ -141,21 +159,8 @@ export class Decorator {
     // ----- city is structured (towers + rails + pads), not scattered -----
     if (this._cityWeightHigh(cx, cz)) this._buildCityBlock(chunk, cx, cz);
 
-    // ----- landmarks (interiors) -----
-    if (!landmarkBuilt) {
-      const ctrX = ox + CHUNK / 2, ctrZ = oz + CHUNK / 2;
-      const cl = W.climate(ctrX, ctrZ);
-      const cy = W.groundHeight(ctrX, ctrZ);
-      if (cy > WATER_LEVEL + 0.5 && W.slope(ctrX, ctrZ) < 0.7) {
-        if (cl.dom === 'hollow' && lmRoll < 0.10) this.interiors.hauntedHouse(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'shrine' && lmRoll < 0.5) this.interiors.shrineSanctum(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'desert' && lmRoll < 0.08) this.interiors.oasisRefuge(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'city' && lmRoll < 0.12) this.interiors.alienSpire(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'forest' && lmRoll < 0.06) this.interiors.greatTree(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'meadow' && lmRoll < 0.04) this.interiors.loneDoor(chunk, ctrX, cy, ctrZ);
-        else if (cl.dom === 'snow' && lmRoll < 0.05) this.interiors.frozenMonument(chunk, ctrX, cy, ctrZ);
-      }
-    }
+    // ----- build the landmark (interior) chosen above, into its cleared space -----
+    if (landmark) landmark();
 
     // ----- realize instanced buckets -----
     for (const [kind, b] of buckets) {

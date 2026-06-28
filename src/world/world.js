@@ -117,6 +117,11 @@ export class World {
       const dx = ch.cx - pcx, dz = ch.cz - pcz;
       if (dx * dx + dz * dz > this.unloadRadius * this.unloadRadius) this._unloadChunk(key);
     }
+    // run "living" updaters (haunted homes that still move, alone) near the player
+    const t = this.materials.time.value;
+    for (const ch of this._nearbyChunks(playerPos.x, playerPos.z)) {
+      if (ch.updaters.length) for (const u of ch.updaters) u(dt, t, playerPos);
+    }
   }
 
   _buildChunk(cx, cz) {

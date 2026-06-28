@@ -65,43 +65,285 @@ export class Interiors {
     chunk.collectibles.push(c); chunk.poi.push(c);
   }
 
-  // ---- HAUNTED HOUSE: rooms downstairs, a stair, a memory in the attic ----
-  hauntedHouse(chunk, x, y, z) {
+  // ======================================================================
+  //  HOMES — the heart of the request. Built to feel like somewhere that was
+  //  warm a long time ago: a hearth, an armchair drawn up to it, a set table,
+  //  a child's room. Then left. The dust, the cold blue at the windows, the
+  //  music box still turning — that's what makes it spooky now, not gore.
+  // ======================================================================
+
+  _homeMats() {
+    if (this._hm) return this._hm;
     const M = this.M;
-    const wallMat = M.std('housewall', 0x241a26, { roughness: 0.95 });
-    const floorMat = M.std('housefloor', 0x2a2018, { roughness: 0.9 });
+    this._hm = {
+      floor: M.std('home-floor', 0x3c2c1e, { roughness: 0.92 }),
+      wall: M.std('home-wall', 0x3b3346, { roughness: 0.95 }),
+      wood: M.std('home-wood', 0x46331f, { roughness: 0.9 }),
+      darkwood: M.std('home-darkwood', 0x2e2014, { roughness: 0.9 }),
+      stone: M.std('home-stone', 0x4a4450, { roughness: 0.96 }),
+      fabricRose: M.std('home-rose', 0x5a3a44, { roughness: 1.0 }),   // faded dusty rose
+      fabricTeal: M.std('home-teal', 0x2f4a4c, { roughness: 1.0 }),   // faded teal
+      linen: M.std('home-linen', 0x6a6258, { roughness: 1.0 }),       // grey, dusty
+      ember: M.glow('home-ember', 0xff7a2a, 1.6),
+      windowGlow: M.glow('home-window', 0x9fb6ff, 0.7, { transparent: true, opacity: 0.8 }),
+      lanternGlow: M.glow('home-lantern', 0xffb868, 1.8),
+    };
+    return this._hm;
+  }
+
+  _portraitTex() {
+    if (this._ptex) return this._ptex;
+    const s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#1a141e'; ctx.fillRect(0, 0, s, s);
+    // a faded pale face, eyes lost to time
+    const g = ctx.createRadialGradient(s / 2, s * 0.42, 4, s / 2, s * 0.5, s * 0.42);
+    g.addColorStop(0, 'rgba(190,180,170,0.6)'); g.addColorStop(1, 'rgba(40,34,44,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(s / 2, s * 0.48, s * 0.26, s * 0.34, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(10,8,14,0.65)';
+    ctx.beginPath(); ctx.ellipse(s * 0.40, s * 0.46, 5, 7, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(s * 0.60, s * 0.46, 5, 7, 0, 0, 7); ctx.fill();
+    this._ptex = new THREE.CanvasTexture(cv); this._ptex.colorSpace = THREE.SRGBColorSpace;
+    return this._ptex;
+  }
+
+  // a plain piece of furniture (visual; optionally a soft circle collider)
+  _furn(chunk, x, y, z, w, h, d, mat, rotY = 0, solid = false) {
+    const m = this._box(chunk, x, y, z, w, h, d, mat, { rotY, shadow: true });
+    if (solid) chunk.walls.push({ type: 'circle', x, z, r: Math.max(w, d) * 0.45, yBot: y - 0.2, yTop: y + h });
+    return m;
+  }
+
+  _rug(chunk, x, y, z, w, d, mat) {
+    this._box(chunk, x, y + 0.04, z, w, 0.06, d, mat, { shadow: false });
+  }
+
+  // cold hearth with a last ember; returns the ember light so it can flicker
+  _hearth(chunk, x, y, z, faceZ) {
+    const hm = this._homeMats();
+    const fz = faceZ; // +1 faces +z, -1 faces -z
+    this._furn(chunk, x, y, z, 4.2, 4.6, 1.0, hm.stone, 0, true);          // chimney breast
+    this._box(chunk, x, y + 0.4, z + fz * 0.45, 2.6, 1.6, 0.5, hm.darkwood, { shadow: false }); // firebox surround
+    this._box(chunk, x, y + 2.6, z + fz * 0.55, 3.2, 0.3, 0.7, hm.wood, { shadow: false });      // mantel
+    const ember = this._light(chunk, x, y + 0.7, z + fz * 0.9, 0xff7a1e, 7, 11);
+    const glow = this._box(chunk, x, y + 0.45, z + fz * 0.55, 1.8, 0.5, 0.2, hm.ember, { shadow: false });
+    return { ember, glow };
+  }
+
+  _armchair(chunk, x, y, z, rotY, mat) {
+    this._furn(chunk, x, y, z, 1.3, 0.5, 1.3, mat, rotY);                  // seat
+    const bx = Math.sin(rotY) * 0.55, bz = Math.cos(rotY) * 0.55;
+    this._box(chunk, x - bx, y + 0.9, z - bz, 1.3, 1.1, 0.25, mat, { rotY, shadow: true }); // back
+    this._box(chunk, x + bz * 0.5, y + 0.65, z - bx * 0.5, 0.25, 0.7, 1.2, mat, { rotY, shadow: false });
+    this._box(chunk, x - bz * 0.5, y + 0.65, z + bx * 0.5, 0.25, 0.7, 1.2, mat, { rotY, shadow: false });
+  }
+
+  // a rocking chair (the updater makes it rock very slightly, alone)
+  _rockingChair(chunk, x, y, z, rotY) {
+    const hm = this._homeMats();
+    const g = new THREE.Group(); g.position.set(x, y, z); g.rotation.y = rotY; chunk.group.add(g);
+    const add = (px, py, pz, w, h, d) => { const m = new THREE.Mesh(this.M.geo('unit', () => new THREE.BoxGeometry(1,1,1)), hm.darkwood); m.position.set(px, py, pz); m.scale.set(w, h, d); m.castShadow = true; g.add(m); };
+    add(0, 0.5, 0, 0.9, 0.12, 0.9);   // seat
+    add(0, 1.0, -0.4, 0.9, 1.0, 0.12); // back
+    add(-0.4, 0.25, 0, 0.1, 0.5, 0.9); add(0.4, 0.25, 0, 0.1, 0.5, 0.9); // sides
+    return g; // rock by tilting this group
+  }
+
+  _table(chunk, x, y, z, w, d, mat) {
+    this._box(chunk, x, y + 0.95, z, w, 0.12, d, mat, { shadow: true });
+    for (const sx of [-1, 1]) for (const sz of [-1, 1])
+      this._box(chunk, x + sx * (w/2 - 0.2), y + 0.47, z + sz * (d/2 - 0.2), 0.14, 0.95, 0.14, mat, { shadow: false });
+    chunk.walls.push({ type: 'circle', x, z, r: Math.max(w, d) * 0.42, yBot: y, yTop: y + 1.1 });
+  }
+  _chair(chunk, x, y, z, rotY, mat) {
+    this._box(chunk, x, y + 0.5, z, 0.6, 0.1, 0.6, mat, { rotY, shadow: true });
+    const bx = Math.sin(rotY) * 0.26, bz = Math.cos(rotY) * 0.26;
+    this._box(chunk, x - bx, y + 0.95, z - bz, 0.6, 0.9, 0.1, mat, { rotY, shadow: false });
+  }
+  _setting(chunk, x, y, z, mat) { // a dusty place setting
+    this._box(chunk, x, y + 1.02, z, 0.34, 0.04, 0.34, mat, { shadow: false });
+  }
+
+  _bed(chunk, x, y, z, rotY, mat, small) {
+    const hm = this._homeMats();
+    const w = small ? 1.1 : 1.8, d = small ? 2.0 : 2.4;
+    this._box(chunk, x, y + 0.35, z, w, 0.5, d, hm.darkwood, { rotY, shadow: true });        // frame
+    this._box(chunk, x, y + 0.62, z, w - 0.15, 0.3, d - 0.2, mat, { rotY, shadow: false });   // mattress/quilt
+    const hx = Math.sin(rotY) * (d/2 - 0.1), hz = Math.cos(rotY) * (d/2 - 0.1);
+    this._box(chunk, x + hx, y + 1.0, z + hz, w, 1.0, 0.16, hm.darkwood, { rotY, shadow: true }); // headboard
+    this._box(chunk, x + hx*0.7, y + 0.78, z + hz*0.7, w*0.5, 0.18, 0.5, hm.linen, { rotY, shadow: false }); // pillow
+    chunk.walls.push({ type: 'circle', x, z, r: Math.max(w, d) * 0.4, yBot: y, yTop: y + 1.0 });
+  }
+
+  _bookshelf(chunk, x, y, z, rotY) {
+    const hm = this._homeMats();
+    this._furn(chunk, x, y, z, 2.0, 3.0, 0.5, hm.wood, rotY, true);
+    const bookCols = [0x4a2a2a, 0x2a3a4a, 0x3a3a26, 0x3a2a40, 0x244a3a];
+    const fx = Math.cos(rotY), fz = -Math.sin(rotY);
+    const inst = new THREE.InstancedMesh(this.M.geo('unit', () => new THREE.BoxGeometry(1,1,1)),
+      this.M.std('home-books', 0xffffff, { roughness: 1, vertexColors: false }), 24);
+    const d3 = new THREE.Object3D(); let bi = 0; const col = new THREE.Color();
+    for (let shelf = 0; shelf < 3; shelf++) {
+      let bx = -0.8;
+      while (bx < 0.8 && bi < 24) {
+        const bw = 0.08 + Math.random() * 0.06, bh = 0.5 + Math.random() * 0.25;
+        const px = x + fx * (bx + bw / 2), pz = z + fz * (bx + bw / 2);
+        d3.position.set(px, y + 0.5 + shelf * 0.85 + bh / 2, pz); d3.rotation.set(0, rotY, 0); d3.scale.set(bw, bh, 0.34);
+        d3.updateMatrix(); inst.setMatrixAt(bi, d3.matrix);
+        col.setHex(bookCols[(Math.random() * bookCols.length) | 0]); inst.setColorAt(bi, col);
+        bi++; bx += bw + 0.01;
+      }
+    }
+    inst.count = bi; inst.instanceMatrix.needsUpdate = true; if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
+    chunk.group.add(inst);
+  }
+
+  _clock(chunk, x, y, z, rotY) {
+    const hm = this._homeMats();
+    this._furn(chunk, x, y, z, 0.8, 3.4, 0.5, hm.darkwood, rotY, true);
+    const fx = Math.cos(rotY), fz = -Math.sin(rotY);
+    this._box(chunk, x + fx * 0.26, y + 2.7, z + fz * 0.26, 0.5, 0.5, 0.06, hm.linen, { rotY, shadow: false }); // pale face
+  }
+
+  _portrait(chunk, x, y, z, rotY) {
+    const hm = this._homeMats();
+    this._box(chunk, x, y, z, 0.9, 1.2, 0.08, hm.darkwood, { rotY, shadow: false }); // frame
+    const fx = Math.cos(rotY), fz = -Math.sin(rotY);
+    const face = new THREE.Mesh(this.M.geo('portrait-plane', () => new THREE.PlaneGeometry(0.7, 1.0)),
+      new THREE.MeshBasicMaterial({ map: this._portraitTex(), transparent: true }));
+    face.position.set(x + fx * 0.05, y, z + fz * 0.05); face.rotation.y = rotY; chunk.group.add(face);
+  }
+
+  _musicBox(chunk, x, y, z) {
+    const hm = this._homeMats();
+    this._box(chunk, x, y, z, 0.5, 0.3, 0.4, hm.wood, { shadow: false });
+    const lid = this._box(chunk, x, y + 0.22, z - 0.15, 0.5, 0.06, 0.1, hm.wood, { shadow: false });
+    const dancer = new THREE.Mesh(this.M.geo('mbox-dancer', () => new THREE.ConeGeometry(0.08, 0.3, 8)),
+      this.M.glow('mbox', 0xffd9a8, 2.0));
+    dancer.position.set(x, y + 0.35, z); chunk.group.add(dancer);
+    this._light(chunk, x, y + 0.4, z, 0xffd9a8, 1.2, 5);
+    return dancer; // updater spins it slowly
+  }
+
+  _dust(chunk, x, y, z, w, h, d) {
+    const N = 46;
+    const g = new THREE.BufferGeometry();
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) { pos[i*3] = x + (Math.random()-0.5)*w; pos[i*3+1] = y + Math.random()*h; pos[i*3+2] = z + (Math.random()-0.5)*d; }
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    const m = new THREE.PointsMaterial({ color: 0xb9a98a, size: 0.05, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, fog: true });
+    const pts = new THREE.Points(g, m); pts.frustumCulled = false; chunk.group.add(pts);
+    chunk.disposables.push(g);
+    return pts;
+  }
+
+  // ---- HAUNTED HOUSE: a home gone cold — parlor, kitchen, a child's room up top ----
+  hauntedHouse(chunk, x, y, z) {
+    const hm = this._homeMats();
+    const wallMat = hm.wall, floorMat = hm.floor;
     const W = 18, D = 16, H = 4.4;
-    // flat floor
     this._floor(chunk, x, y + 0.05, z, W, D, floorMat);
     this._floor(chunk, x, y + H + 0.05, z, W, D, floorMat); // upper floor
-    // outer walls with a front doorway (gap in -z wall)
-    this._wall(chunk, x, y, z - D / 2, W, H * 2, 0.4, wallMat);          // back
-    // front wall split for a door
+    // outer walls (front doorway gap on +z)
+    this._wall(chunk, x, y, z - D / 2, W, H * 2, 0.4, wallMat);
     this._wall(chunk, x - W / 4 - 1, y, z + D / 2, W / 2 - 2, H * 2, 0.4, wallMat);
     this._wall(chunk, x + W / 4 + 1, y, z + D / 2, W / 2 - 2, H * 2, 0.4, wallMat);
-    this._wall(chunk, x, y + H * 1.4, z + D / 2, 4, H * 0.6, 0.4, wallMat); // lintel over door
-    this._wall(chunk, x - W / 2, y, z, 0.4, H * 2, D, wallMat);          // left
-    this._wall(chunk, x + W / 2, y, z, 0.4, H * 2, D, wallMat);          // right
-    // an interior partition with a doorway
-    this._wall(chunk, x - 3, y, z, 0.3, H, D / 2 - 2, wallMat);
-    // pitched roof
-    const roof = this._box(chunk, x, y + H * 2, z, W + 1, 0.4, D + 1, wallMat);
-    // glowing windows
-    for (const wx of [-W/2, W/2]) for (const wz of [-3, 3]) {
-      const win = M.glow('hwin', 0xffcf85, 1.2, { opacity: 0.9, transparent: true });
-      this._box(chunk, x + wx, y + 2.2, z + wz, 0.1, 1.4, 1.0, win, { shadow: false });
-    }
-    // furniture
-    this._box(chunk, x + 4, y + 0.5, z - 3, 2.4, 1.0, 1.2, floorMat); // table
-    this._box(chunk, x - 5, y + 0.7, z + 4, 1.2, 1.4, 1.2, wallMat);  // chair-ish
-    // stair to the attic (along +x against right wall)
-    this._steps(chunk, x + 2, y, z - 5, 3, 'x', 8, H / 8, 0.9, floorMat);
-    // ambience
-    this._light(chunk, x, y + 2.5, z, 0xffcf85, 4, 18);
-    this._light(chunk, x, y + H + 2.0, z, 0x9a7dff, 3, 16);
-    // the reward: a memory in the attic
-    this._memory(chunk, x, y + H + 1.6, z - 4, 0xffd9a0);
+    this._wall(chunk, x, y + H * 1.4, z + D / 2, 4, H * 0.6, 0.4, wallMat); // lintel
+    this._wall(chunk, x - W / 2, y, z, 0.4, H * 2, D, wallMat);
+    this._wall(chunk, x + W / 2, y, z, 0.4, H * 2, D, wallMat);
+    this._wall(chunk, x - 3, y, z + 2, 0.3, H, D / 2 - 1, wallMat);  // parlor/kitchen partition
+    this._wall(chunk, x, y + H * 2, z, W + 1, 0.4, D + 1, wallMat);   // roof
+    // cold blue at the windows (emissive — they glow on their own); one cool spill
+    for (const wx of [-W/2, W/2]) for (const wz of [-3.5, 3.5])
+      this._box(chunk, x + wx, y + 2.2, z + wz, 0.1, 1.5, 1.1, hm.windowGlow, { shadow: false });
+    this._light(chunk, x, y + 2.8, z, 0x6f86c8, 7, 18); // one cool spill across the room
+
+    // ---- the parlor (right side): hearth, the chairs drawn up to it, a rug ----
+    const hearth = this._hearth(chunk, x + W/2 - 1.2, y, z - 2, +1); // against right wall, faces in
+    this._rug(chunk, x + 3.5, y, z - 1, 5, 4, hm.fabricRose);
+    this._armchair(chunk, x + 2.5, y, z - 2.5, -0.5, hm.fabricTeal);
+    const rocker = this._rockingChair(chunk, x + 4.8, y, z + 0.5, 2.4); // rocks, alone
+    this._furn(chunk, x + 3.6, y, z - 0.6, 1.1, 0.5, 0.7, hm.darkwood);   // low table
+    this._bookshelf(chunk, x + W/2 - 0.6, y, z + 3, -Math.PI/2);
+    this._clock(chunk, x - W/2 + 0.6, y, z - 5, Math.PI/2);               // grandfather clock
+    this._portrait(chunk, x, y + 2.6, z - D/2 + 0.3, 0);
+    this._portrait(chunk, x + 5, y + 2.6, z - D/2 + 0.3, 0);
+
+    // ---- the kitchen (left side): a set table that was never cleared ----
+    this._table(chunk, x - 5, y, z + 3, 2.6, 1.4, hm.wood);
+    this._chair(chunk, x - 5, y, z + 4.3, 0, hm.wood);
+    this._chair(chunk, x - 5, y, z + 1.7, Math.PI, hm.wood);
+    this._chair(chunk, x - 6.6, y, z + 3, Math.PI/2, hm.wood);
+    this._setting(chunk, x - 4.4, y, z + 3, hm.linen);
+    this._setting(chunk, x - 5.6, y, z + 3, hm.linen);
+    this._furn(chunk, x - W/2 + 0.9, y, z + 5, 2.4, 1.6, 1.0, hm.darkwood, 0, true); // counter/stove
+
+    // ---- stairs up, and the child's room above ----
+    this._steps(chunk, x - 1, y, z - 6.5, 2.4, 'x', 8, H / 8, 0.9, hm.wood);
+    this._bed(chunk, x - 5, y + H, z - 4.5, 0, hm.fabricRose, true);       // a small bed
+    this._furn(chunk, x - 5, y + H, z + 3, 1.2, 1.4, 0.6, hm.darkwood, 0, true); // toy chest
+    const horse = this._furn(chunk, x - 2.5, y + H, z + 1, 1.2, 1.0, 0.4, hm.wood); // rocking horse
+    this._portrait(chunk, x + 4, y + H + 2.4, z - D/2 + 0.3, 0);
+    this._bed(chunk, x + 4.5, y + H, z - 4.5, 0, hm.fabricTeal, false);    // the parents' bed
+
+    // dust in the cold light; a single lantern still burning; the music box turning
+    this._dust(chunk, x, y + 1.2, z, W - 3, 3, D - 3);
+    const lantern = this._box(chunk, x - 2, y + H - 0.6, z, 0.3, 0.5, 0.3, hm.lanternGlow, { shadow: false });
+    this._light(chunk, x - 2, y + H - 0.7, z, 0xffc078, 14, 15);           // lantern upstairs
+    this._light(chunk, x + 3.2, y + 2.4, z - 1.5, 0xffae66, 11, 17);       // parlor warmth
+    this._light(chunk, x - 4.5, y + 2.4, z + 3, 0xffc080, 13, 16);         // kitchen warmth
+    this._light(chunk, x, y + H + 2.4, z - 2, 0xc79cff, 11, 16);           // upstairs, cool
+    const dancer = this._musicBox(chunk, x - 5, y + H + 1.15, z - 4.5);   // on the child's bed-side
+
+    // the memory waits in the child's room
+    this._memory(chunk, x - 2.5, y + H + 1.4, z - 5, 0xffd9a0);
+
+    // a few things still move, alone
+    chunk.updaters.push((dt, t) => {
+      hearth.ember.intensity = 7 + Math.sin(t * 6.3) * 1.6 + Math.sin(t * 11.7) * 0.8;
+      rocker.rotation.x = Math.sin(t * 1.15) * 0.045;
+      if (dancer) dancer.rotation.y = t * 1.4;
+    });
     this._landmark(chunk, x, y, z, 'A House That Waited', 'house');
+  }
+
+  // ---- FOREST CABIN: one warm room deep in the woods, left to the cold ----
+  forestCabin(chunk, x, y, z) {
+    const hm = this._homeMats();
+    const W = 11, D = 10, H = 3.6;
+    this._floor(chunk, x, y + 0.05, z, W, D, hm.floor);
+    this._wall(chunk, x, y, z - D/2, W, H, 0.35, hm.darkwood);
+    this._wall(chunk, x - W/4 - 0.7, y, z + D/2, W/2 - 1.4, H, 0.35, hm.darkwood);
+    this._wall(chunk, x + W/4 + 0.7, y, z + D/2, W/2 - 1.4, H, 0.35, hm.darkwood);
+    this._wall(chunk, x - W/2, y, z, 0.35, H, D, hm.darkwood);
+    this._wall(chunk, x + W/2, y, z, 0.35, H, D, hm.darkwood);
+    // pitched-ish roof (two slabs)
+    this._box(chunk, x, y + H + 0.6, z - 2, W + 1, 0.3, D/2 + 1, hm.wood, { rotY: 0, shadow: true });
+    this._box(chunk, x, y + H + 0.6, z + 2, W + 1, 0.3, D/2 + 1, hm.wood, { shadow: true });
+    // a window, cold and blue (emissive; the cool spill is added below)
+    this._box(chunk, x - W/2, y + 1.9, z, 0.1, 1.1, 1.0, hm.windowGlow, { shadow: false });
+    // the hearth and the chair that faced it
+    const hearth = this._hearth(chunk, x, y, z - D/2 + 0.8, +1);
+    this._rug(chunk, x, y, z + 0.5, 4, 3.2, hm.fabricRose);
+    const rocker = this._rockingChair(chunk, x + 1.6, y, z + 1, 2.6);
+    this._armchair(chunk, x - 1.8, y, z + 0.5, 0.6, hm.fabricTeal);
+    this._table(chunk, x + 2.5, y, z + 3, 1.8, 1.1, hm.wood);
+    this._chair(chunk, x + 2.5, y, z + 4, 0, hm.wood);
+    this._setting(chunk, x + 2.5, y, z + 3, hm.linen);
+    this._bed(chunk, x - 3, y, z + 3, 0, hm.linen, false);
+    this._bookshelf(chunk, x + W/2 - 0.5, y, z - 2, -Math.PI/2);
+    this._portrait(chunk, x, y + 2.2, z - D/2 + 0.25, 0);
+    this._dust(chunk, x, y + 1.0, z, W - 2, 2.4, D - 2);
+    this._light(chunk, x, y + 2.4, z, 0xffb066, 9, 14);                   // warm room fill
+    this._light(chunk, x - W/2 + 0.6, y + 1.9, z, 0x6f86c8, 4, 9);        // cold window spill
+    const dancer = this._musicBox(chunk, x + 2.5, y + 1.15, z + 3);
+    this._memory(chunk, x, y + 1.4, z + 1, 0xffd9a0);
+    chunk.updaters.push((dt, t) => {
+      hearth.ember.intensity = 6 + Math.sin(t * 6.0) * 1.4 + Math.sin(t * 10.3) * 0.7;
+      rocker.rotation.x = Math.sin(t * 1.05 + 1) * 0.05;
+      if (dancer) dancer.rotation.y = t * 1.3;
+    });
+    this._landmark(chunk, x, y, z, 'A Cabin in the Cold Woods', 'cabin');
   }
 
   // ---- ALIEN SPIRE: a tall hollow tower you climb by pad, ledges and a rail ----
