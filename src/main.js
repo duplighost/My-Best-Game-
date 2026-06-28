@@ -70,6 +70,7 @@ class Game {
     this._lastLandmark = null;
     this._homeNearPos = null;
     this._homeMusicT = 0;
+    this._crackleT = 0;
 
     this._bindUI();
     this._placePlayer();
@@ -355,6 +356,11 @@ class Game {
     this.audio.setBiome(cl.dom, danger * 0.5);
     this.hud.setBiome(cl.dom);
     if (!this.save.progress.seenBiomes.includes(cl.dom)) this._addSeen('seenBiomes', cl.dom);
+
+    // weather: rain in the hollow, god-rays through the forest canopy by day
+    const hollowW = cl.w.hollow || 0, forestW = cl.w.forest || 0;
+    this.r.setWeather(hollowW, clamp01((forestW - 0.35) * 2) * dayF * 0.34);
+    this.audio.setRain(hollowW * 0.9);
     return cl;
   }
 
@@ -461,6 +467,8 @@ class Game {
     if (this._homeNearPos) {
       this._homeMusicT -= realDt;
       if (this._homeMusicT <= 0) { this.audio.musicBox(this._homeNearPos); this._homeMusicT = 17 + Math.random() * 9; }
+      this._crackleT -= realDt;
+      if (this._crackleT <= 0) { this.audio.crackle(this._homeNearPos); this._crackleT = 0.9 + Math.random() * 1.8; }
     }
 
     // fade/respawn

@@ -118,16 +118,35 @@ export class Interiors {
     this._box(chunk, x, y + 0.04, z, w, 0.06, d, mat, { shadow: false });
   }
 
-  // cold hearth with a last ember; returns the ember light so it can flicker
+  // a hearth with a fire still burning, alone — flames flicker, the light
+  // breathes, and it crackles (the crackle audio plays when you're near a home).
   _hearth(chunk, x, y, z, faceZ) {
     const hm = this._homeMats();
     const fz = faceZ; // +1 faces +z, -1 faces -z
     this._furn(chunk, x, y, z, 4.2, 4.6, 1.0, hm.stone, 0, true);          // chimney breast
-    this._box(chunk, x, y + 0.4, z + fz * 0.45, 2.6, 1.6, 0.5, hm.darkwood, { shadow: false }); // firebox surround
+    this._box(chunk, x, y + 0.4, z + fz * 0.45, 2.6, 1.6, 0.5, hm.darkwood, { shadow: false }); // firebox
     this._box(chunk, x, y + 2.6, z + fz * 0.55, 3.2, 0.3, 0.7, hm.wood, { shadow: false });      // mantel
-    const ember = this._light(chunk, x, y + 0.7, z + fz * 0.9, 0xff7a1e, 7, 11);
-    const glow = this._box(chunk, x, y + 0.45, z + fz * 0.55, 1.8, 0.5, 0.2, hm.ember, { shadow: false });
-    return { ember, glow };
+    this._box(chunk, x - 0.4, y + 0.26, z + fz * 0.5, 1.5, 0.18, 0.22, hm.darkwood, { rotY: 0.25, shadow: false }); // logs
+    this._box(chunk, x + 0.4, y + 0.34, z + fz * 0.5, 1.5, 0.18, 0.22, hm.darkwood, { rotY: -0.28, shadow: false });
+    const ember = this._light(chunk, x, y + 0.7, z + fz * 0.85, 0xff7a1e, 7, 11);
+    this._box(chunk, x, y + 0.45, z + fz * 0.55, 1.8, 0.5, 0.2, hm.ember, { shadow: false }); // bed of coals
+    const flames = [];
+    const fmat = this.M.glow('flame', 0xff8a2a, 2.8);
+    for (let i = 0; i < 5; i++) {
+      const fl = new THREE.Mesh(this.M.geo('flame', () => new THREE.ConeGeometry(0.18, 0.8, 6)), fmat);
+      fl.position.set(x + (i - 2) * 0.3, y + 0.55, z + fz * 0.5);
+      fl.renderOrder = 4; chunk.group.add(fl); flames.push(fl);
+    }
+    chunk.updaters.push((dt, t) => {
+      ember.intensity = 7 + Math.sin(t * 7.1) * 1.9 + Math.sin(t * 13.7) * 1.0;
+      for (let i = 0; i < flames.length; i++) {
+        const f = flames[i], ph = t * 9 + i * 1.7;
+        f.scale.y = 0.7 + Math.abs(Math.sin(ph)) * 0.85 + Math.sin(ph * 2.3) * 0.2;
+        f.scale.x = f.scale.z = 0.8 + Math.sin(ph * 1.7) * 0.16;
+        f.position.y = y + 0.55 + f.scale.y * 0.2;
+      }
+    });
+    return { ember, lit: true };
   }
 
   _armchair(chunk, x, y, z, rotY, mat) {
@@ -237,12 +256,65 @@ export class Interiors {
     return pts;
   }
 
+  // a floor/ceiling slab built as panels around a rectangular opening (a stairwell)
+  _slabWithHole(chunk, cx, y, cz, W, D, hole, mat, asPlatform) {
+    const x0 = cx - W / 2, x1 = cx + W / 2, z0 = cz - D / 2, z1 = cz + D / 2;
+    const hx0 = Math.max(x0, hole.minx), hx1 = Math.min(x1, hole.maxx);
+    const hz0 = Math.max(z0, hole.minz), hz1 = Math.min(z1, hole.maxz);
+    const panel = (px0, px1, pz0, pz1) => {
+      const w = px1 - px0, d = pz1 - pz0; if (w <= 0.05 || d <= 0.05) return;
+      this._box(chunk, (px0 + px1) / 2, y - 0.1, (pz0 + pz1) / 2, w, 0.2, d, mat, { shadow: false });
+      if (asPlatform) chunk.platforms.push({ minx: px0, maxx: px1, minz: pz0, maxz: pz1, top: y });
+    };
+    panel(x0, x1, z0, hz0);    // strip before the hole
+    panel(x0, x1, hz1, z1);    // strip after the hole
+    panel(x0, hx0, hz0, hz1);  // left of the hole
+    panel(hx1, x1, hz0, hz1);  // right of the hole
+  }
+
+  _stepsDown(chunk, x, y, z, w, dir, count, rise, run, mat) {
+    for (let i = 0; i < count; i++) {
+      const sy = y - (i + 1) * rise;
+      const sx = dir === 'x' ? x + i * run : x;
+      const sz = dir === 'z' ? z + i * run : z;
+      const sw = dir === 'x' ? run + 0.04 : w, sd = dir === 'z' ? run + 0.04 : w;
+      this._box(chunk, sx, sy - 0.1, sz, sw, 0.2, sd, mat, { shadow: false });
+      chunk.platforms.push({ minx: sx - sw / 2, maxx: sx + sw / 2, minz: sz - sd / 2, maxz: sz + sd / 2, top: sy });
+    }
+  }
+
+  // ---- CELLAR: descend below a home into the cold dark. A Memory waits there. ----
+  _cellar(chunk, x, y, z, CW, CD, sw) {
+    const hm = this._homeMats();
+    const depth = 4.4, cy = y - depth;
+    this._floor(chunk, x, cy + 0.05, z, CW, CD, hm.stone);                 // cellar floor
+    this._wall(chunk, x, cy, z - CD / 2, CW, depth, 0.4, hm.stone);
+    this._wall(chunk, x, cy, z + CD / 2, CW, depth, 0.4, hm.stone);
+    this._wall(chunk, x - CW / 2, cy, z, 0.4, depth, CD, hm.stone);
+    this._wall(chunk, x + CW / 2, cy, z, 0.4, depth, CD, hm.stone);
+    this._slabWithHole(chunk, x, y - 0.25, z, CW, CD, sw, hm.darkwood, false); // ceiling w/ stairwell gap
+    const sx = (sw.minx + sw.maxx) / 2, swid = (sw.maxx - sw.minx) - 0.3;
+    const zlen = sw.maxz - sw.minz, count = 11;
+    this._stepsDown(chunk, sx, y, sw.minz + 0.4, swid, 'z', count, (depth - 0.3) / count, (zlen - 0.6) / count, hm.wood);
+    chunk.pits.push({ minx: x - CW / 2, maxx: x + CW / 2, minz: z - CD / 2, maxz: z + CD / 2 });
+    // contents: barrels, a shelf, a dim swaying cold bulb, dust, and a Memory
+    for (let i = 0; i < 4; i++) this._furn(chunk, x + (i - 1.5) * 1.4 + 1, cy, z - CD / 2 + 1.2, 0.9, 1.2, 0.9, hm.darkwood, 0, true);
+    this._bookshelf(chunk, x + CW / 2 - 0.6, cy, z, -Math.PI / 2);
+    const bulb = this._light(chunk, x, cy + depth - 1.0, z, 0x9fd0c0, 6, 15);
+    this._box(chunk, x, cy + depth - 0.6, z, 0.16, 0.16, 0.16, this.M.glow('cellarbulb', 0xbfe6d8, 1.8), { shadow: false });
+    this._dust(chunk, x, cy + 0.8, z, CW - 2, depth - 1.5, CD - 2);
+    this._memory(chunk, x, cy + 1.3, z + CD / 2 - 1.6, 0xbfe6d8);
+    chunk.updaters.push((dt, t) => { bulb.intensity = 4 + Math.sin(t * 3.1) * 1.6 + (Math.sin(t * 23) > 0.92 ? -3.2 : 0); });
+  }
+
   // ---- HAUNTED HOUSE: a home gone cold — parlor, kitchen, a child's room up top ----
   hauntedHouse(chunk, x, y, z) {
     const hm = this._homeMats();
     const wallMat = hm.wall, floorMat = hm.floor;
     const W = 18, D = 16, H = 4.4;
-    this._floor(chunk, x, y + 0.05, z, W, D, floorMat);
+    const CW = 12, CD = 10;
+    const sw = { minx: x - 5, maxx: x - 2.2, minz: z - 1, maxz: z + 3 }; // the stairwell down
+    this._slabWithHole(chunk, x, y + 0.05, z, W, D, sw, floorMat, true);  // ground floor (minus stairwell)
     this._floor(chunk, x, y + H + 0.05, z, W, D, floorMat); // upper floor
     // outer walls (front doorway gap on +z)
     this._wall(chunk, x, y, z - D / 2, W, H * 2, 0.4, wallMat);
@@ -300,10 +372,10 @@ export class Interiors {
 
     // a few things still move, alone
     chunk.updaters.push((dt, t) => {
-      hearth.ember.intensity = 7 + Math.sin(t * 6.3) * 1.6 + Math.sin(t * 11.7) * 0.8;
       rocker.rotation.x = Math.sin(t * 1.15) * 0.045;
       if (dancer) dancer.rotation.y = t * 1.4;
     });
+    this._cellar(chunk, x, y, z, CW, CD, sw); // and a cellar, below it all
     this._landmark(chunk, x, y, z, 'A House That Waited', 'house');
   }
 
@@ -339,7 +411,6 @@ export class Interiors {
     const dancer = this._musicBox(chunk, x + 2.5, y + 1.15, z + 3);
     this._memory(chunk, x, y + 1.4, z + 1, 0xffd9a0);
     chunk.updaters.push((dt, t) => {
-      hearth.ember.intensity = 6 + Math.sin(t * 6.0) * 1.4 + Math.sin(t * 10.3) * 0.7;
       rocker.rotation.x = Math.sin(t * 1.05 + 1) * 0.05;
       if (dancer) dancer.rotation.y = t * 1.3;
     });

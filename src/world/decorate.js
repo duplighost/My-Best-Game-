@@ -16,9 +16,38 @@ export class Decorator {
     this.interiors = new Interiors(world, this);
   }
 
-  decorate(chunk, cx, cz) {
+  // Decide a chunk's landmark deterministically. Pure (no side effects) so
+  // world._buildChunk can ask for it *before* building terrain, to cut the
+  // cellar hole, then hand the same plan back to decorate().
+  _rect(x, z, w, d) { return { minx: x - w / 2, maxx: x + w / 2, minz: z - d / 2, maxz: z + d / 2 }; }
+  planLandmark(cx, cz) {
+    const W = this.world, ox = cx * CHUNK, oz = cz * CHUNK;
+    const ctrX = ox + CHUNK / 2, ctrZ = oz + CHUNK / 2;
+    const out = { kind: null, clearR: 0, hole: null, ctrX, ctrZ, y: 0 };
+    const y = W.groundHeight(ctrX, ctrZ);
+    out.y = y;
+    if (!(y > WATER_LEVEL + 0.5 && W.slope(ctrX, ctrZ) < 0.7)) return out;
+    const lmRoll = hash2(cx, cz, 7777);
+    const dom = W.climate(ctrX, ctrZ).dom;
+    if (dom === 'hollow') {
+      if (lmRoll < 0.14) { out.kind = 'hauntedHouse'; out.clearR = 22; out.hole = this._rect(ctrX, ctrZ, 12, 10); }
+      else if (lmRoll < 0.24) { out.kind = 'forestCabin'; out.clearR = 14; }
+    } else if (dom === 'forest') {
+      if (lmRoll < 0.06) { out.kind = 'greatTree'; out.clearR = 16; }
+      else if (lmRoll < 0.15) { out.kind = 'forestCabin'; out.clearR = 14; }
+    } else if (dom === 'shrine' && lmRoll < 0.5) { out.kind = 'shrineSanctum'; out.clearR = 16; }
+    else if (dom === 'desert' && lmRoll < 0.08) { out.kind = 'oasisRefuge'; out.clearR = 26; }
+    else if (dom === 'city' && lmRoll < 0.12) { out.kind = 'alienSpire'; out.clearR = 12; }
+    else if (dom === 'meadow' && lmRoll < 0.04) { out.kind = 'loneDoor'; out.clearR = 6; }
+    else if (dom === 'snow' && lmRoll < 0.05) { out.kind = 'frozenMonument'; out.clearR = 13; }
+    return out;
+  }
+
+  decorate(chunk, cx, cz, plan) {
     const ox = cx * CHUNK, oz = cz * CHUNK;
     const W = this.world;
+    if (!plan) plan = this.planLandmark(cx, cz);
+    const ctrX = plan.ctrX, ctrZ = plan.ctrZ, clearR = plan.clearR;
     // bucket transforms per kind so we can instance them
     const buckets = new Map(); // kind -> { geo, mat, mats:[], shadow }
     const addInst = (kind, geoFn, mat, m, shadow = false) => {
@@ -30,27 +59,6 @@ export class Decorator {
     const sample = 9;                 // 9x9 scatter candidates
     const cellW = CHUNK / sample;
     const dummy = new THREE.Object3D();
-
-    // ----- decide the landmark up front so scatter can clear a space for it -----
-    const lmRoll = hash2(cx, cz, 7777);
-    const ctrX = ox + CHUNK / 2, ctrZ = oz + CHUNK / 2;
-    const lmCl = W.climate(ctrX, ctrZ);
-    const lmY = W.groundHeight(ctrX, ctrZ);
-    let landmark = null, clearR = 0;
-    if (lmY > WATER_LEVEL + 0.5 && W.slope(ctrX, ctrZ) < 0.7) {
-      const I = this.interiors, dom = lmCl.dom;
-      if (dom === 'hollow') {
-        if (lmRoll < 0.14) { landmark = () => I.hauntedHouse(chunk, ctrX, lmY, ctrZ); clearR = 22; }
-        else if (lmRoll < 0.24) { landmark = () => I.forestCabin(chunk, ctrX, lmY, ctrZ); clearR = 14; }
-      } else if (dom === 'forest') {
-        if (lmRoll < 0.06) { landmark = () => I.greatTree(chunk, ctrX, lmY, ctrZ); clearR = 16; }
-        else if (lmRoll < 0.15) { landmark = () => I.forestCabin(chunk, ctrX, lmY, ctrZ); clearR = 14; }
-      } else if (dom === 'shrine' && lmRoll < 0.5) { landmark = () => I.shrineSanctum(chunk, ctrX, lmY, ctrZ); clearR = 16; }
-      else if (dom === 'desert' && lmRoll < 0.08) { landmark = () => I.oasisRefuge(chunk, ctrX, lmY, ctrZ); clearR = 26; }
-      else if (dom === 'city' && lmRoll < 0.12) { landmark = () => I.alienSpire(chunk, ctrX, lmY, ctrZ); clearR = 12; }
-      else if (dom === 'meadow' && lmRoll < 0.04) { landmark = () => I.loneDoor(chunk, ctrX, lmY, ctrZ); clearR = 6; }
-      else if (dom === 'snow' && lmRoll < 0.05) { landmark = () => I.frozenMonument(chunk, ctrX, lmY, ctrZ); clearR = 13; }
-    }
 
     for (let gz = 0; gz < sample; gz++) {
       for (let gx = 0; gx < sample; gx++) {
@@ -159,8 +167,21 @@ export class Decorator {
     // ----- city is structured (towers + rails + pads), not scattered -----
     if (this._cityWeightHigh(cx, cz)) this._buildCityBlock(chunk, cx, cz);
 
-    // ----- build the landmark (interior) chosen above, into its cleared space -----
-    if (landmark) landmark();
+    // ----- build the planned landmark into its cleared space -----
+    if (plan.kind) {
+      const I = this.interiors, x = plan.ctrX, y = plan.y, z = plan.ctrZ;
+      const build = {
+        hauntedHouse: () => I.hauntedHouse(chunk, x, y, z),
+        forestCabin: () => I.forestCabin(chunk, x, y, z),
+        greatTree: () => I.greatTree(chunk, x, y, z),
+        shrineSanctum: () => I.shrineSanctum(chunk, x, y, z),
+        oasisRefuge: () => I.oasisRefuge(chunk, x, y, z),
+        alienSpire: () => I.alienSpire(chunk, x, y, z),
+        loneDoor: () => I.loneDoor(chunk, x, y, z),
+        frozenMonument: () => I.frozenMonument(chunk, x, y, z),
+      }[plan.kind];
+      if (build) build();
+    }
 
     // ----- realize instanced buckets -----
     for (const [kind, b] of buckets) {

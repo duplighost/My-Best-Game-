@@ -128,6 +128,10 @@ export class Renderer {
     this._buildStars(this.q.stars);
     this._buildAurora();
     this._buildCelestials();
+    this._buildGodrays();
+    this._buildRain();
+    this._rainLevel = 0; this._rainTarget = 0;
+    this._godrayTarget = 0;
 
     // ---- post ----
     const size = new THREE.Vector2(window.innerWidth * this.q.bloomRes, window.innerHeight * this.q.bloomRes);
@@ -319,6 +323,55 @@ export class Renderer {
     this.scene.add(this.clouds);
   }
 
+  _buildGodrays() {
+    // warm light shafts that fall through a canopy by day. Soft-edged additive
+    // planes, tilted toward the sun, clustered near the player.
+    const group = new THREE.Group(); group.frustumCulled = false;
+    const mat = new THREE.MeshBasicMaterial({ color: 0xfff0cf, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false, vertexColors: true });
+    this.godrayMat = mat;
+    for (let i = 0; i < 7; i++) {
+      const geo = new THREE.PlaneGeometry(2.8, 46, 1, 1);
+      const p = geo.attributes.position, col = new Float32Array(p.count * 3);
+      for (let v = 0; v < p.count; v++) {
+        const yy = p.getY(v); const f = (yy + 23) / 46; // 1 at top, 0 at bottom
+        col[v*3] = f; col[v*3+1] = f; col[v*3+2] = f;
+      }
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      const m = new THREE.Mesh(geo, mat);
+      const a = (i / 7) * Math.PI * 2 + i; const r = 10 + (i % 3) * 9;
+      m.position.set(Math.cos(a) * r, 18, Math.sin(a) * r);
+      m.rotation.set(0.32, a, 0.18);
+      m.renderOrder = 2; group.add(m);
+    }
+    this.godrays = group; this.scene.add(group);
+  }
+
+  _buildRain() {
+    const N = this.quality === 'low' ? 140 : 300;
+    this._rainN = N;
+    const geo = new THREE.BoxGeometry(0.025, 0.9, 0.025);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xbcd4ff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+    this.rainMat = mat;
+    this.rain = new THREE.InstancedMesh(geo, mat, N);
+    this.rain.frustumCulled = false; this.rain.renderOrder = 3;
+    this._rainBase = new Float32Array(N * 2); // x,z offsets around player
+    this._rainY = new Float32Array(N);
+    this._rainSpd = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      this._rainBase[i*2] = (Math.random() - 0.5) * 46;
+      this._rainBase[i*2+1] = (Math.random() - 0.5) * 46;
+      this._rainY[i] = Math.random() * 30;
+      this._rainSpd[i] = 26 + Math.random() * 14;
+    }
+    this._rainDummy = new THREE.Object3D();
+    this.scene.add(this.rain);
+  }
+
+  setWeather(rain, godray) {
+    if (rain != null) this._rainTarget = rain;
+    if (godray != null) this._godrayTarget = godray;
+  }
+
   setSky(env) {
     // env: { horizon, zenith, ground, sunCol, fog, fogDensity, hemiSky, hemiGround, sunI, hemiI, aurora }
     if (env.horizon) this.targetHorizon.setHex(env.horizon);
@@ -390,6 +443,32 @@ export class Renderer {
       this.clouds.rotation.y = time * 0.004;
       const day = clamp(sunDir.y * 1.4 + 0.35, 0, 1);
       this.cloudMat.opacity = damp(this.cloudMat.opacity, day * 0.42, 1.5, dt);
+    }
+
+    // god-rays through the canopy (forest, by day)
+    if (this.godrays) {
+      this.godrayMat.opacity = damp(this.godrayMat.opacity, this._godrayTarget, 1.5, dt);
+      this.godrays.position.set(playerPos.x, 0, playerPos.z);
+      this.godrays.rotation.y = time * 0.02;
+      this.godrays.visible = this.godrayMat.opacity > 0.004;
+    }
+
+    // rain (the hollow's weather)
+    this._rainLevel = damp(this._rainLevel, this._rainTarget, 2.0, dt);
+    if (this.rain) {
+      this.rainMat.opacity = this._rainLevel * 0.5;
+      if (this._rainLevel > 0.01) {
+        this.rain.visible = true;
+        const N = this._rainN, D = this._rainDummy;
+        for (let i = 0; i < N; i++) {
+          this._rainY[i] -= this._rainSpd[i] * dt;
+          if (this._rainY[i] < -8) this._rainY[i] += 34;
+          D.position.set(playerPos.x + this._rainBase[i*2], playerPos.y + this._rainY[i] - 6, playerPos.z + this._rainBase[i*2+1]);
+          D.rotation.z = 0.12; D.updateMatrix();
+          this.rain.setMatrixAt(i, D.matrix);
+        }
+        this.rain.instanceMatrix.needsUpdate = true;
+      } else this.rain.visible = false;
     }
 
     // sun light position relative to player

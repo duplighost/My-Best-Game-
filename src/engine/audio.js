@@ -122,6 +122,33 @@ export class Audio {
   memory() { for (let i = 0; i < 4; i++) setTimeout(() => this._tone([262, 330, 392, 523][i], 0.5, 'sine', 0.05, 1.0), i * 90); }
   rail() { this._tone(260, 0.3, 'sawtooth', 0.04, 1.4); }
   enter() { this._tone(180, 0.4, 'sine', 0.05, 1.3); this._tone(90, 0.5, 'sine', 0.04, 1.2); }
+  // fire: a soft pop/crackle near a lit hearth
+  crackle(pos) {
+    if (!this.started || this.muted) return;
+    const n = 1 + (Math.random() * 3 | 0);
+    for (let i = 0; i < n; i++) setTimeout(() => { this._noise(0.03, 0.05, pos); this._tone(120 + Math.random() * 160, 0.05, 'triangle', 0.02, 0.7, pos); }, i * (40 + Math.random() * 120));
+  }
+
+  // rain: a continuous bandpassed-noise hiss whose level tracks the storm
+  _ensureRain() {
+    if (this._rain || !this.started) return;
+    const n = Math.floor(this.ctx.sampleRate * 2);
+    const buf = this.ctx.createBuffer(1, n, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+    const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1600; bp.Q.value = 0.4;
+    const hp = this.ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 500;
+    const g = this.ctx.createGain(); g.gain.value = 0;
+    src.connect(bp); bp.connect(hp); hp.connect(g); g.connect(this.master); src.start();
+    this._rain = { src, g };
+  }
+  setRain(level) {
+    if (!this.started || this.muted) { if (this._rain) this._rain.g.gain.value = 0; return; }
+    this._ensureRain();
+    if (this._rain) this._rain.g.gain.setTargetAtTime(Math.max(0, level) * 0.09, this.ctx.currentTime, 0.6);
+  }
+
   // a faint, slightly out-of-time music-box lullaby — comfort gone cold
   musicBox(pos) {
     if (!this.started || this.muted) return;

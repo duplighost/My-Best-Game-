@@ -126,7 +126,7 @@ export class Terrain {
     out[0] = r; out[1] = g; out[2] = b;
   }
 
-  buildTerrainMesh(cx, cz, material) {
+  buildTerrainMesh(cx, cz, material, hole) {
     const ox = cx * CHUNK, oz = cz * CHUNK;
     const n = RES + 1;
     const verts = n * n;
@@ -166,6 +166,10 @@ export class Terrain {
     }
     for (let j = 0; j < RES; j++) {
       for (let i = 0; i < RES; i++) {
+        if (hole) { // skip quads inside a landmark's cellar opening
+          const ccx = ox + (i + 0.5) * step, ccz = oz + (j + 0.5) * step;
+          if (ccx > hole.minx && ccx < hole.maxx && ccz > hole.minz && ccz < hole.maxz) continue;
+        }
         const a = j * n + i, b = a + 1, d = a + n, e = d + 1;
         idx.push(a, d, b, b, d, e);
       }

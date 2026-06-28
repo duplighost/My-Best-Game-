@@ -268,13 +268,16 @@ export class Controller {
     // vertical
     this.pos.y += this.vel.y * dt;
 
-    // ground resolution: highest of terrain or a platform top under the feet
-    const terrain = this.world.groundHeight ? this.world.groundHeight(this.pos.x, this.pos.z) : 0;
+    // ground resolution: highest of terrain or a platform top under the feet.
+    // inside a cellar (a "pit") the terrain is ignored so you can go underground.
+    const inPit = this.world.inPit && this.world.inPit(this.pos.x, this.pos.z);
+    const terrain = (!inPit && this.world.groundHeight) ? this.world.groundHeight(this.pos.x, this.pos.z) : -Infinity;
     let ground = terrain;
     if (this.world.platformTop) {
       const top = this.world.platformTop(this.pos.x, this.pos.z, this.pos.y, this.vel.y);
       if (top > ground && top <= this.pos.y + STEP_UP + 0.05) ground = top;
     }
+    if (ground === -Infinity) ground = this.pos.y - 100; // safety: never snap when unsupported in a pit
 
     const wasAir = !this.onGround;
     if (this.pos.y <= ground + 0.001 && this.vel.y <= 0.001) {

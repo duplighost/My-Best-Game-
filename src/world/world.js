@@ -75,6 +75,7 @@ export class World {
     this.poi = [];                  // points of interest (dash targets, landmarks, secrets)
     this.collectibles = [];         // glimmers, memories, relics waiting to be found
     this.interiorTriggers = [];     // doorways that reveal where you can enter
+    this.pits = [];                 // rects where you may descend below the ground (cellars)
     this.entities = null;           // set by main; queried for dash homing
     this.decorator = null;          // set by main
     this.onChunkBuilt = null;
@@ -127,13 +128,16 @@ export class World {
   _buildChunk(cx, cz) {
     const key = this._key(cx, cz);
     const group = new THREE.Group();
-    const { mesh, minH, maxH } = this.terrain.buildTerrainMesh(cx, cz, this.materials.terrain);
+    // a landmark may need a hole cut in the terrain (a cellar you can see into)
+    const plan = this.decorator ? this.decorator.planLandmark(cx, cz) : null;
+    const hole = plan && plan.hole ? plan.hole : null;
+    const { mesh, minH, maxH } = this.terrain.buildTerrainMesh(cx, cz, this.materials.terrain, hole);
     group.add(mesh);
 
     const chunk = {
       cx, cz, key, group,
       walls: [], platforms: [], rails: [], airpads: [], poi: [],
-      collectibles: [], interiors: [],
+      collectibles: [], interiors: [], pits: [],
       disposables: [mesh.geometry], updaters: [],
     };
 
@@ -149,7 +153,7 @@ export class World {
     }
 
     // decorate (flora, structures, landmarks, secrets, rails, creatures)
-    if (this.decorator) this.decorator.decorate(chunk, cx, cz);
+    if (this.decorator) this.decorator.decorate(chunk, cx, cz, plan);
 
     // register dynamic collections
     for (const r of chunk.rails) this.rails.push(r);
@@ -157,6 +161,7 @@ export class World {
     for (const p of chunk.poi) this.poi.push(p);
     for (const c of chunk.collectibles) this.collectibles.push(c);
     for (const it of chunk.interiors) this.interiorTriggers.push(it);
+    for (const pt of chunk.pits) this.pits.push(pt);
 
     this.root.add(group);
     this.chunks.set(key, chunk);
@@ -174,6 +179,7 @@ export class World {
     for (const p of ch.poi) { const i = this.poi.indexOf(p); if (i >= 0) this.poi.splice(i, 1); }
     for (const c of ch.collectibles) { const i = this.collectibles.indexOf(c); if (i >= 0) this.collectibles.splice(i, 1); }
     for (const it of ch.interiors) { const i = this.interiorTriggers.indexOf(it); if (i >= 0) this.interiorTriggers.splice(i, 1); }
+    for (const pt of ch.pits) { const i = this.pits.indexOf(pt); if (i >= 0) this.pits.splice(i, 1); }
     if (ch.onUnload) ch.onUnload();
     this.chunks.delete(key);
   }
@@ -230,6 +236,13 @@ export class World {
       }
     }
     return best;
+  }
+
+  // inside a cellar footprint, the ground no longer holds you up — platforms
+  // (the cellar floor and the stairs) take over so you can descend.
+  inPit(x, z) {
+    for (const p of this.pits) if (x > p.minx && x < p.maxx && z > p.minz && z < p.maxz) return true;
+    return false;
   }
 
   airPadAt(x, z, y) {
