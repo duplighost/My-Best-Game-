@@ -172,7 +172,7 @@ export class World {
     const ch = this.chunks.get(key);
     if (!ch) return;
     this.root.remove(ch.group);
-    ch.group.traverse((o) => { if (o.isMesh && o.geometry && o.geometry._unique) o.geometry.dispose(); });
+    ch.group.traverse((o) => { if (o.isInstancedMesh) o.dispose(); else if (o.isMesh && o.geometry && o.geometry._unique) o.geometry.dispose(); });
     for (const g of ch.disposables) { if (g && g.dispose) g.dispose(); }
     for (const r of ch.rails) { const i = this.rails.indexOf(r); if (i >= 0) this.rails.splice(i, 1); }
     for (const p of ch.airpads) { const i = this.airpads.indexOf(p); if (i >= 0) this.airpads.splice(i, 1); }

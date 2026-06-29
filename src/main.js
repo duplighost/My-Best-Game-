@@ -67,6 +67,7 @@ class Game {
       onBossSpawn: (b) => this._onBossSpawn(b),
       onBossHp: (name, frac) => this.hud.setBoss(name, frac),
       onBossDeath: (pos) => this._onBossDeath(pos),
+      onBossGone: () => { this.hud.clearBoss(); this._bossCd = 45; },
     });
 
     this.hud = new HUD(document.getElementById('hud'));
@@ -86,6 +87,8 @@ class Game {
     this.fading = false; this.fadeT = 0;
     this._saveT = 0;
     this._fwd = new THREE.Vector3();
+    this._sunDir = new THREE.Vector3();
+    this._boonQueue = 0;
     this._envAccum = {};
     this._tutorialStep = 0;
     this._lastLandmark = null;
@@ -211,6 +214,7 @@ class Game {
   }
 
   _play() {
+    this._boonQueue = 0; // never carry a stale queued boon into a fresh run
     this.audio.start(); this.audio.resume();
     document.getElementById('title').classList.add('hidden');
     document.getElementById('title').classList.remove('active');
@@ -233,17 +237,25 @@ class Game {
     this.state = 'playing';
     if (!this.input.isTouch) this.input.requestLock();
     this.audio.resume();
+    setTimeout(() => this._tryOpenBoon(), 300);
   }
   _openAtlas() {
+    // remember where we came from so closing returns there (J during play -> play)
+    if (this.state !== 'atlas') this._atlasReturn = this.state;
     this.hud.buildAtlas(this.save.progress);
     document.getElementById('atlas').classList.remove('hidden');
     document.getElementById('atlas').classList.add('active');
     this.state = 'atlas';
+    if (!this.input.isTouch) this.input.exitLock(); // free the cursor so Close is clickable
   }
   _closeAtlas() {
     document.getElementById('atlas').classList.add('hidden');
     document.getElementById('atlas').classList.remove('active');
-    this.state = 'paused';
+    this.state = this._atlasReturn || 'paused';
+    if (this.state === 'playing') {
+      if (!this.input.isTouch) this.input.requestLock();
+      setTimeout(() => this._tryOpenBoon(), 300);
+    }
   }
   _toTitleFromPause() {
     this._writeSave();
@@ -308,7 +320,7 @@ class Game {
       this.hud.flash('#ffe9a8', 0.5);
       this.hud.popup(new THREE.Vector3(c.x, c.baseY + 0.8, c.z), 'a memory kept', '#ffe9a8', true);
       this.hud.toast('a memory kept — keep one thing of it', 3);
-      setTimeout(() => { if (this.state === 'playing') this.openBoonChoice(); }, 650);
+      setTimeout(() => this._queueBoon(), 650);
     } else if (c.kind === 'relic') {
       this.save.progress.relics++;
       if (c.ability) { this.controller.abilities[c.ability] = true; this.save.progress.abilities[c.ability] = true; }
@@ -347,6 +359,18 @@ class Game {
     this.senseCdMax = Math.max(0.5, 1.5 * Math.pow(0.82, lvl('sense')));
   }
 
+  // queue boons so two close-together memories (or a memory during the boss reward)
+  // never drop a choice — they open one after another instead of overwriting
+  _queueBoon() {
+    this._boonQueue = (this._boonQueue || 0) + 1;
+    this._tryOpenBoon();
+  }
+  _tryOpenBoon() {
+    if (this.state !== 'playing' || this._boonQueue <= 0) return;
+    this._boonQueue--;
+    this.openBoonChoice();
+  }
+
   openBoonChoice() {
     const bo = this.save.progress.boons;
     const pool = BOONS.filter((b) => (bo[b.id] || 0) < 6);
@@ -378,6 +402,8 @@ class Game {
     this.state = 'playing';
     this.hud.flash('#ffe9a8', 0.3);
     if (!this.input.isTouch) this.input.requestLock();
+    // if more memories stacked up while this card was open, open the next after a beat
+    setTimeout(() => this._tryOpenBoon(), 450);
   }
 
   // ---------- the boss ----------
@@ -397,7 +423,7 @@ class Game {
     this.hud.toast('the Keeper is at rest — it leaves you a memory', 5);
     this.audio.memory();
     this._writeSave();
-    setTimeout(() => { if (this.state === 'playing') this.openBoonChoice(); }, 1000);
+    setTimeout(() => this._queueBoon(), 1000);
     this._bossCd = 150;
   }
   _maybeWakeBoss(cl, realDt) {
@@ -447,7 +473,7 @@ class Game {
     this.dayTime = (this.dayTime + dt / 220) % 1; // ~3.7 min day
     const ang = this.dayTime * Math.PI * 2;
     const sunY = Math.sin(ang);
-    const sunDir = this._fwd.set(Math.cos(ang) * 0.6, Math.max(-0.3, sunY), Math.sin(ang * 0.7) * 0.6).normalize();
+    const sunDir = this._sunDir.set(Math.cos(ang) * 0.6, Math.max(-0.3, sunY), Math.sin(ang * 0.7) * 0.6).normalize();
     const dayF = clamp01(sunY * 1.4 + 0.35); // 0 night .. 1 day
     this._dayF = dayF;
 
@@ -547,8 +573,11 @@ class Game {
     if (this.state === 'playing') this._stepPlaying(realDt);
     else if (this.state === 'paused' || this.state === 'atlas' || this.state === 'boon') {
       // keep the world gently breathing behind the menu
-      this.r.update(realDt, this.time, this.controller.pos, this._fwd);
+      this.r.update(realDt, this.time, this.controller.pos, this._sunDir);
       this.world.materials.update(realDt * 0.2);
+      // drop any input that piled up while menus were open so it can't fire on resume
+      this.input.consumeLook();
+      this.input.endFrame();
     }
     this.r.render();
   }

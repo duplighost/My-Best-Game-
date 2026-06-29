@@ -89,10 +89,16 @@ export class Input {
   }
 
   requestLock() {
-    if (!this.isTouch && this.canvas.requestPointerLock) this.canvas.requestPointerLock();
+    if (this.isTouch || !this.canvas.requestPointerLock) return;
+    if (document.pointerLockElement === this.canvas) return; // already locked
+    try {
+      const r = this.canvas.requestPointerLock();
+      // newer browsers return a promise that can reject (no gesture / already locked) — swallow it
+      if (r && typeof r.catch === 'function') r.catch(() => {});
+    } catch (e) { /* pointer lock unavailable — non-fatal */ }
   }
   exitLock() {
-    if (document.exitPointerLock) document.exitPointerLock();
+    try { if (document.exitPointerLock) document.exitPointerLock(); } catch (e) { /* non-fatal */ }
   }
 
   _bindTouch() {

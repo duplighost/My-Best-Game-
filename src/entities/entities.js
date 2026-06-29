@@ -40,6 +40,7 @@ export class Entities {
     this.pulseDmg = 1;    // boon: stronger light
     this.boss = null;
     this.bossWaves = [];
+    this.dropped = [];    // dropped glimmers (capped, so kills don't leak forever)
     this.world.entities = this; // so dash homing can see enemies
   }
 
@@ -203,7 +204,8 @@ export class Entities {
   _updateCollectibles(dt, playerPos) {
     const list = this.world.collectibles;
     const pull = 9 * this.magnetMul;
-    for (let i = 0; i < list.length; i++) {
+    // iterate backward: _collect() may splice a dropped glimmer out of this list
+    for (let i = list.length - 1; i >= 0; i--) {
       const c = list[i];
       if (c.taken || c.hidden) continue;   // hidden vaults must be sensed first
       c.phase += dt * 2;
@@ -233,6 +235,12 @@ export class Entities {
     if (c.light) c.light.visible = false;
     this.fx.burst(c.x, c.baseY, c.z, c.color, c.kind === 'glimmer' ? 14 : 30, { up: 1, spread: c.kind === 'glimmer' ? 3 : 6, life: 0.9 });
     this.ctx.onCollect && this.ctx.onCollect(c);
+    // dropped glimmers have no chunk to unload them — remove on pickup
+    if (c._dropped) {
+      if (c.mesh) this.scene.remove(c.mesh);
+      let i = this.world.collectibles.indexOf(c); if (i >= 0) this.world.collectibles.splice(i, 1);
+      i = this.dropped.indexOf(c); if (i >= 0) this.dropped.splice(i, 1);
+    }
   }
 
   _updateCreatures(dt, playerPos) {
@@ -309,7 +317,7 @@ export class Entities {
       const pvy = Math.abs(e.pos.y - (playerPos.y + 1));
       if (pd < 1.5 && pvy < 2.4) {
         if (ctrl.iframes > 0 && (ctrl.dashing)) { this._damageEnemy(e, 2, playerPos); }
-        else if (this.ctx.damagePlayer) this.ctx.damagePlayer(def.contact, e.pos);
+        else if (!(ctrl.iframes > 0) && this.ctx.damagePlayer) this.ctx.damagePlayer(def.contact, e.pos);
       }
       // despawn far
       if (dist > 140) { this.scene.remove(e.group); this.enemies.splice(i, 1); }
@@ -359,6 +367,13 @@ export class Entities {
     this.scene.add(mesh);
     const c = { x, y, z, kind: 'glimmer', color, mesh, taken: false, dashable: false, baseY: y, phase: 0, value: 1, _dropped: true };
     this.world.collectibles.push(c);
+    this.dropped.push(c);
+    // cap uncollected drops so a long fight doesn't grow the array/scene forever
+    while (this.dropped.length > 40) {
+      const old = this.dropped.shift();
+      if (old.mesh) this.scene.remove(old.mesh);
+      const i = this.world.collectibles.indexOf(old); if (i >= 0) this.world.collectibles.splice(i, 1);
+    }
   }
 
   _updateBolts(dt, realDt, playerPos) {
@@ -461,7 +476,7 @@ export class Entities {
       if (Math.abs(d - w.r) < 1.3 && this.ctx.controller.onGround && !(this.ctx.controller.iframes > 0) && !w.hitPlayer) {
         w.hitPlayer = true; this.ctx.damagePlayer && this.ctx.damagePlayer(12, { x: w.x, y: playerPos.y, z: w.z });
       }
-      if (w.life <= 0) { this.scene.remove(w.mesh); this.bossWaves.splice(i, 1); }
+      if (w.life <= 0) { this.scene.remove(w.mesh); w.mesh.material.dispose(); this.bossWaves.splice(i, 1); }
     }
     if (!B || !B.alive) return;
     B.phase += dt; B.cd -= dt; B.flash = Math.max(0, B.flash - dt * 4);
@@ -499,6 +514,9 @@ export class Entities {
     }
     // body contact damage
     if (dist < 2.6 && !(ctrl.iframes > 0)) this.ctx.damagePlayer && this.ctx.damagePlayer(11, B.pos);
+
+    // it gives up and fades back into the dark if you flee far enough
+    if (dist > 95) { this.scene.remove(B.group); this.boss = null; if (this.ctx.onBossGone) this.ctx.onBossGone(); return; }
 
     if (this.ctx.onBossHp) this.ctx.onBossHp(B.name, this._bossFrac());
   }
@@ -554,7 +572,7 @@ export class Entities {
 
   clear() {
     if (this.boss) { this.scene.remove(this.boss.group); this.boss = null; }
-    for (const w of this.bossWaves) this.scene.remove(w.mesh);
+    for (const w of this.bossWaves) { this.scene.remove(w.mesh); w.mesh.material.dispose(); }
     this.bossWaves.length = 0;
     for (const e of this.enemies) this.scene.remove(e.group);
     for (const c of this.creatures) this.scene.remove(c.group);
