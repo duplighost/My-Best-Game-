@@ -488,6 +488,7 @@ class Game {
     // audio mood
     const danger = clamp01(this.entities.enemies.length / 6);
     this.audio.setBiome(cl.dom, danger * 0.5);
+    this.r.setHorizon(cl.dom);
     this.hud.setBiome(cl.dom);
     if (!this.save.progress.seenBiomes.includes(cl.dom)) this._addSeen('seenBiomes', cl.dom);
 

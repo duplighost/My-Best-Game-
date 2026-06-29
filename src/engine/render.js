@@ -130,6 +130,7 @@ export class Renderer {
     this._buildCelestials();
     this._buildGodrays();
     this._buildRain();
+    this._buildHorizon();
     this._rainLevel = 0; this._rainTarget = 0;
     this._godrayTarget = 0;
 
@@ -372,6 +373,105 @@ export class Renderer {
     if (godray != null) this._godrayTarget = godray;
   }
 
+  // ---- distant horizon: procedurally-drawn ridgelines per biome, tinted live
+  // by the sky so it respects day/night. Keeps Reverie zero-asset while giving
+  // each biome a far skyline (mesas, peaks, a neon city, dead spires...). ----
+  _horizonTexture(key) {
+    if (!this._htex) this._htex = {};
+    if (this._htex[key]) return this._htex[key];
+    const W = 1024, H = 256;
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    const ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    let seed = 0; for (let i = 0; i < key.length; i++) seed = (seed * 31 + key.charCodeAt(i)) >>> 0;
+    const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+    // three layers rising from the horizon line (v~0.5); far=hazy/light, near=dark/tall
+    const layers = [
+      { baseV: 0.50, amp: 0.10, val: 190, alpha: 0.38, step: 30 },
+      { baseV: 0.49, amp: 0.20, val: 128, alpha: 0.64, step: 22 },
+      { baseV: 0.46, amp: 0.36, val: 70,  alpha: 1.0,  step: 14 },
+    ];
+    for (let li = 0; li < layers.length; li++) {
+      const L = layers[li];
+      const pts = [];
+      const n = Math.ceil(W / L.step) + 1;
+      let h = L.baseV;
+      for (let i = 0; i <= n; i++) {
+        const x = i * L.step;
+        let v;
+        if (key === 'city') { // blocky neon skyline
+          v = L.baseV + (rnd() < 0.5 ? rnd() * L.amp * 2.2 : rnd() * L.amp * 0.4);
+        } else if (key === 'snow' || key === 'shrine') { // sharp peaks / monoliths
+          v = L.baseV + Math.pow(rnd(), 0.6) * L.amp * 2.0;
+        } else if (key === 'desert') { // flat-topped mesas
+          if (i % 3 === 0) h = L.baseV + rnd() * L.amp * 1.6;
+          v = h;
+        } else if (key === 'hollow') { // jagged thin dead spires
+          v = L.baseV + (rnd() < 0.35 ? rnd() * L.amp * 2.6 : rnd() * L.amp * 0.3);
+        } else { // meadow/forest: rolling/bumpy tree-line
+          h += (rnd() - 0.5) * L.amp * 0.9; h = Math.max(L.baseV * 0.5, Math.min(L.baseV + L.amp, h));
+          v = h;
+        }
+        pts.push([x, v]);
+      }
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (const [x, v] of pts) {
+        const y = H - v * H;
+        if (key === 'city' || key === 'desert') ctx.lineTo(x, y); // flat tops
+        else ctx.lineTo(x, y);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fillStyle = `rgba(${L.val},${L.val},${L.val},${L.alpha})`;
+      ctx.fill();
+      // a touch of haze along the base of each ridge
+      const g = ctx.createLinearGradient(0, H - L.baseV * H - 20, 0, H - L.baseV * H + 30);
+      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, `rgba(220,220,220,${L.alpha * 0.18})`);
+      ctx.fillStyle = g; ctx.fillRect(0, H - L.baseV * H - 20, W, 60);
+    }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    this._htex[key] = tex;
+    return tex;
+  }
+
+  _buildHorizon() {
+    const def = this._horizonTexture('meadow');
+    this.horizonUniforms = {
+      texA: { value: def }, texB: { value: def }, uMix: { value: 1 },
+      uTint: { value: new THREE.Color(0x556699) }, uBright: { value: 1 },
+    };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: this.horizonUniforms, transparent: true, depthWrite: false, fog: false, side: THREE.BackSide,
+      vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+      fragmentShader: `
+        uniform sampler2D texA; uniform sampler2D texB; uniform float uMix; uniform vec3 uTint; uniform float uBright;
+        varying vec2 vUv;
+        void main(){
+          vec4 a = texture2D(texA, vUv); vec4 b = texture2D(texB, vUv);
+          vec4 t = mix(b, a, uMix);
+          gl_FragColor = vec4(uTint * (0.35 + t.rgb * 1.1) * uBright, t.a);
+        }`,
+    });
+    const geo = new THREE.CylinderGeometry(1100, 1100, 620, 64, 1, true);
+    this.horizon = new THREE.Mesh(geo, mat);
+    this.horizon.position.y = 10;
+    this.horizon.frustumCulled = false;
+    this.horizon.renderOrder = -990;
+    this.scene.add(this.horizon);
+    this._horizonKey = 'meadow';
+  }
+
+  setHorizon(key) {
+    if (!this.horizon || key === this._horizonKey) return;
+    this._horizonKey = key;
+    this.horizonUniforms.texB.value = this.horizonUniforms.texA.value;
+    this.horizonUniforms.texA.value = this._horizonTexture(key);
+    this.horizonUniforms.uMix.value = 0; // crossfade B -> A
+  }
+
   setSky(env) {
     // env: { horizon, zenith, ground, sunCol, fog, fogDensity, hemiSky, hemiGround, sunI, hemiI, aurora }
     if (env.horizon) this.targetHorizon.setHex(env.horizon);
@@ -469,6 +569,14 @@ export class Renderer {
         }
         this.rain.instanceMatrix.needsUpdate = true;
       } else this.rain.visible = false;
+    }
+
+    // distant horizon ridgelines: follow the player, crossfade biomes, tint to sky
+    if (this.horizon) {
+      this.horizon.position.set(playerPos.x, playerPos.y + 1.6, playerPos.z); // base sits at the eye-level horizon
+      this.horizonUniforms.uMix.value = damp(this.horizonUniforms.uMix.value, 1, 1.6, dt);
+      this.horizonUniforms.uTint.value.copy(this.skyUniforms.uHorizon.value);
+      this.horizonUniforms.uBright.value = clamp(sunDir.y * 1.4 + 0.5, 0.32, 1.15);
     }
 
     // sun light position relative to player
